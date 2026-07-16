@@ -1,0 +1,31 @@
+[package]
+name = "localfiles"
+version = "0.1.0"
+description = "LocalFiles — gerenciador de arquivos 100% offline da suíte Local"
+authors = ["Taylor"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Anon5T4R/LocalFiles"
+
+[lib]
+# O sufixo `_lib` evita conflito entre o nome da lib e o do binário no Windows
+# (https://github.com/rust-lang/cargo/issues/8519).
+name = "localfiles_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Excluir = lixeira do SO, nunca delete permanente (mesmo padrão do LocalImage).
+trash = "5"
+# Discos/volumes na sidebar (total/livre/removível).
+sysinfo = "0.33"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"

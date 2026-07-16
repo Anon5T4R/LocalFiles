@@ -1,0 +1,139 @@
+import { useEffect, useRef, useState } from "react";
+import { breadcrumbOf } from "../lib/fsutil";
+import { t } from "../lib/i18n";
+import { useFiles } from "../state/tabs";
+import { useUi } from "../state/ui";
+
+/** Barra superior: navegação, breadcrumb (clica pra editar), visão e config. */
+export default function TopBar() {
+  const tab = useFiles((s) => s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]);
+  const view = useFiles((s) => s.view);
+  const { navigate, goBack, goForward, goUp, refresh, setView } = useFiles.getState();
+  const setSettingsOpen = useUi((s) => s.setSettingsOpen);
+  const pushToast = useUi((s) => s.pushToast);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(tab.path);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(tab.path);
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing, tab.path]);
+
+  // Ctrl+L abre a edição de caminho (padrão de navegador/Explorer).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        setEditing(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const submitPath = async () => {
+    setEditing(false);
+    const target = draft.trim();
+    if (!target || target === tab.path) return;
+    try {
+      await navigate(target);
+      const err = useFiles.getState().activeTab().error;
+      if (err) pushToast("error", t("toast.invalidPath", { path: target }));
+    } catch {
+      pushToast("error", t("toast.invalidPath", { path: target }));
+    }
+  };
+
+  const crumbs = breadcrumbOf(tab.path);
+
+  return (
+    <div className="topbar">
+      <div className="nav-buttons">
+        <button title={t("nav.back")} disabled={tab.histIndex <= 0} onClick={goBack}>
+          ←
+        </button>
+        <button
+          title={t("nav.forward")}
+          disabled={tab.histIndex >= tab.history.length - 1}
+          onClick={goForward}
+        >
+          →
+        </button>
+        <button title={t("nav.up")} onClick={goUp}>
+          ↑
+        </button>
+        <button title={t("nav.refresh")} onClick={() => void refresh()}>
+          ⟳
+        </button>
+      </div>
+
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="path-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submitPath();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onBlur={() => setEditing(false)}
+          spellCheck={false}
+        />
+      ) : (
+        <div className="breadcrumb" title={t("nav.editPath")} onClick={(e) => {
+          // Clique no "vazio" da barra = editar; clique num segmento navega.
+          if (e.target === e.currentTarget) setEditing(true);
+        }}>
+          {crumbs.map((c, i) => (
+            <span key={c.path} className="crumb-wrap">
+              {i > 0 && <span className="crumb-sep">›</span>}
+              <button
+                className="crumb"
+                onClick={() => void navigate(c.path)}
+                title={c.path}
+              >
+                {c.name}
+              </button>
+            </span>
+          ))}
+          <span className="crumb-fill" onClick={() => setEditing(true)} />
+        </div>
+      )}
+
+      <div className="topbar-actions">
+        <div className="view-switch" role="group">
+          <button
+            className={view === "details" ? "active" : ""}
+            title={t("view.details")}
+            onClick={() => setView("details")}
+          >
+            ☰
+          </button>
+          <button
+            className={view === "list" ? "active" : ""}
+            title={t("view.list")}
+            onClick={() => setView("list")}
+          >
+            ≡
+          </button>
+          <button
+            className={view === "grid" ? "active" : ""}
+            title={t("view.grid")}
+            onClick={() => setView("grid")}
+          >
+            ▦
+          </button>
+        </div>
+        <button title={t("topbar.settingsTitle")} onClick={() => setSettingsOpen(true)}>
+          ⚙
+        </button>
+      </div>
+    </div>
+  );
+}
