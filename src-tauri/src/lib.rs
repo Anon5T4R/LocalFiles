@@ -1,4 +1,7 @@
 mod ops;
+mod search;
+mod thumbs;
+mod watch;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,12 +11,13 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use ops::{Mode, OpsState};
+use watch::WatchState;
 
 // ---------- listagem ----------
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct Entry {
+pub(crate) struct Entry {
     name: String,
     path: String,
     is_dir: bool,
@@ -25,6 +29,28 @@ struct Entry {
     is_symlink: bool,
 }
 
+/// Monta um Entry a partir de caminho+metadata (listagem e busca usam o mesmo).
+pub(crate) fn entry_from(path: &Path, meta: &fs::Metadata, name: String) -> Entry {
+    let is_dir = meta.is_dir();
+    let ext = if is_dir {
+        String::new()
+    } else {
+        path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+    };
+    let hidden = is_hidden(meta, &name);
+    Entry {
+        name,
+        path: path.to_string_lossy().into_owned(),
+        is_dir,
+        size: if is_dir { 0 } else { meta.len() },
+        modified_ms: modified_ms(meta),
+        ext,
+        hidden,
+        readonly: meta.permissions().readonly(),
+        is_symlink: meta.file_type().is_symlink(),
+    }
+}
+
 fn modified_ms(meta: &fs::Metadata) -> i64 {
     meta.modified()
         .ok()
@@ -34,14 +60,14 @@ fn modified_ms(meta: &fs::Metadata) -> i64 {
 }
 
 #[cfg(windows)]
-fn is_hidden(meta: &fs::Metadata, _name: &str) -> bool {
+pub(crate) fn is_hidden(meta: &fs::Metadata, _name: &str) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
 }
 
 #[cfg(not(windows))]
-fn is_hidden(_meta: &fs::Metadata, name: &str) -> bool {
+pub(crate) fn is_hidden(_meta: &fs::Metadata, name: &str) -> bool {
     name.starts_with('.')
 }
 
@@ -58,28 +84,10 @@ fn list_dir(path: String, show_hidden: bool) -> Result<Vec<Entry>, String> {
         let Ok(smeta) = entry.metadata().or_else(|_| fs::symlink_metadata(entry.path())) else {
             continue;
         };
-        let hidden = is_hidden(&smeta, &name);
-        if hidden && !show_hidden {
+        if is_hidden(&smeta, &name) && !show_hidden {
             continue;
         }
-        let is_dir = smeta.is_dir();
-        let p = entry.path();
-        let ext = if is_dir {
-            String::new()
-        } else {
-            p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
-        };
-        out.push(Entry {
-            name,
-            path: p.to_string_lossy().into_owned(),
-            is_dir,
-            size: if is_dir { 0 } else { smeta.len() },
-            modified_ms: modified_ms(&smeta),
-            ext,
-            hidden,
-            readonly: smeta.permissions().readonly(),
-            is_symlink: smeta.file_type().is_symlink(),
-        });
+        out.push(entry_from(&entry.path(), &smeta, name));
     }
     Ok(out)
 }
@@ -223,9 +231,68 @@ fn start_transfer(
     Ok(op_id)
 }
 
+/// Cancela qualquer operação registrada (transferência OU busca).
 #[tauri::command(async)]
-fn cancel_transfer(state: State<'_, OpsState>, op_id: u64) {
+fn cancel_op(state: State<'_, OpsState>, op_id: u64) {
     state.cancel(op_id);
+}
+
+// ---------- busca / watcher / lote (v0.2) ----------
+
+/// Dispara a busca recursiva; resultados via `search-result`/`search-done`.
+#[tauri::command(async)]
+fn start_search(
+    app: AppHandle,
+    state: State<'_, OpsState>,
+    root: String,
+    query: String,
+    in_content: bool,
+    show_hidden: bool,
+) -> Result<u64, String> {
+    if query.trim().is_empty() {
+        return Err("busca vazia".into());
+    }
+    let (op_id, cancel) = state.register();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        search::run_search(handle.clone(), op_id, cancel, root, query, in_content, show_hidden);
+        handle.state::<OpsState>().finish(op_id);
+    });
+    Ok(op_id)
+}
+
+/// Observa a pasta da aba ativa (`dir-changed` debounced quando muda por fora).
+#[tauri::command(async)]
+fn watch_dir(app: AppHandle, state: State<'_, WatchState>, path: String) -> Result<(), String> {
+    watch::watch_dir(&app, &state, path)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenameSpec {
+    path: String,
+    new_name: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RenameResult {
+    ok: bool,
+    new_path: Option<String>,
+    error: Option<String>,
+}
+
+/// Renomear em lote: aplica item a item (a UI pré-validou colisões) e devolve
+/// o resultado de cada um — um erro não interrompe os demais.
+#[tauri::command(async)]
+fn batch_rename(items: Vec<RenameSpec>) -> Vec<RenameResult> {
+    items
+        .into_iter()
+        .map(|it| match rename_entry(it.path, it.new_name) {
+            Ok(p) => RenameResult { ok: true, new_path: Some(p), error: None },
+            Err(e) => RenameResult { ok: false, new_path: None, error: Some(e) },
+        })
+        .collect()
 }
 
 // ---------- propriedades ----------
@@ -351,6 +418,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(OpsState::default())
+        .manage(WatchState::default())
         .invoke_handler(tauri::generate_handler![
             list_dir,
             list_drives,
@@ -359,10 +427,15 @@ pub fn run() {
             rename_entry,
             delete_to_trash,
             start_transfer,
-            cancel_transfer,
+            cancel_op,
             entry_properties,
             open_with_dialog,
             get_startup_dir,
+            start_search,
+            watch_dir,
+            batch_rename,
+            thumbs::thumbnail,
+            thumbs::read_text_head,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -67,7 +67,10 @@ export interface Tab {
   loading: boolean;
   error: string | null;
   selection: string[];
+  /** Âncora fixa do Shift+clique/setas. */
   anchor: number | null;
+  /** Ponta móvel da seleção por teclado (setas). */
+  focusIdx: number | null;
 }
 
 export interface ClipboardState {
@@ -79,4 +82,45 @@ export interface RunningOp {
   opId: number;
   isMove: boolean;
   progress: OpProgress | null;
+}
+
+// ---------- v0.2 ----------
+
+export interface TextHead {
+  text: string;
+  truncated: boolean;
+}
+
+export interface RenameResult {
+  ok: boolean;
+  newPath: string | null;
+  error: string | null;
+}
+
+export interface SearchBatch {
+  opId: number;
+  entries: Entry[];
+}
+
+export interface SearchDone {
+  opId: number;
+  total: number;
+  truncated: boolean;
+  canceled: boolean;
+}
+
+/** Busca ativa (substitui a listagem até fechar). */
+export interface SearchState {
+  root: string;
+  query: string;
+  inContent: boolean;
+  running: boolean;
+  opId: number | null;
+  results: Entry[];
+  truncated: boolean;
+}
+
+export interface Favorite {
+  name: string;
+  path: string;
 }

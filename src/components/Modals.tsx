@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as actions from "../lib/actions";
+import BatchRenameModal from "./BatchRenameModal";
 import { formatBytes, formatDate, kindOf, uniqueName } from "../lib/fsutil";
 import { localeTag, t } from "../lib/i18n";
 import { useFiles } from "../state/tabs";
@@ -29,6 +30,7 @@ export default function Modals() {
           <DeleteDialog paths={dialog.paths} firstName={dialog.firstName} />
         )}
         {dialog.kind === "properties" && <PropertiesDialog />}
+        {dialog.kind === "batchRename" && <BatchRenameModal paths={dialog.paths} />}
       </div>
     </div>
   );

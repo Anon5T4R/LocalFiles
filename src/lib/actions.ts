@@ -91,8 +91,20 @@ export async function confirmNewFolder(name: string) {
 
 export function startRename(path?: string) {
   const files = useFiles.getState();
-  const target = path ?? files.activeTab().selection[0];
+  const sel = files.activeTab().selection;
+  // Vários selecionados + F2 = renomear em lote (um só = inline).
+  if (!path && sel.length > 1) {
+    askBatchRename();
+    return;
+  }
+  const target = path ?? sel[0];
   if (target) files.setRenaming(target);
+}
+
+export function askBatchRename() {
+  const sel = useFiles.getState().activeTab().selection;
+  if (sel.length < 2) return;
+  useUi.getState().setDialog({ kind: "batchRename", paths: sel });
 }
 
 export async function confirmRename(path: string, newName: string) {
@@ -139,5 +151,5 @@ export function showProperties(path: string) {
 
 export function selectAll() {
   const files = useFiles.getState();
-  files.setSelection(files.activeTab().entries.map((e) => e.path));
+  files.setSelection(files.visibleEntries().map((e) => e.path));
 }

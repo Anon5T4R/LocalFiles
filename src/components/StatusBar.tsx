@@ -29,7 +29,19 @@ export default function StatusBar() {
         </span>
       )}
       <span className="status-fill" />
-      {drive && <span>{t("status.free", { free: formatBytes(drive.available) })}</span>}
+      {drive && (
+        <span className="status-drive">
+          <span className="status-bar-track">
+            <span
+              className="status-bar-used"
+              style={{
+                width: `${drive.total > 0 ? Math.round(((drive.total - drive.available) / drive.total) * 100) : 0}%`,
+              }}
+            />
+          </span>
+          {t("status.free", { free: formatBytes(drive.available) })}
+        </span>
+      )}
     </div>
   );
 }

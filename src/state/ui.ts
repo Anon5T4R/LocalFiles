@@ -15,6 +15,7 @@ export type Dialog =
   | { kind: "rename"; path: string; name: string }
   | { kind: "delete"; paths: string[]; firstName: string }
   | { kind: "properties"; path: string; props: Properties | null }
+  | { kind: "batchRename"; paths: string[] }
   | null;
 
 export interface MenuState {
@@ -28,6 +29,7 @@ interface UiState {
   theme: Theme;
   settingsOpen: boolean;
   showHidden: boolean;
+  previewOpen: boolean;
   dialog: Dialog;
   menu: MenuState | null;
   toasts: Toast[];
@@ -35,6 +37,7 @@ interface UiState {
   setTheme: (t: Theme) => void;
   setSettingsOpen: (v: boolean) => void;
   setShowHidden: (v: boolean) => void;
+  setPreviewOpen: (v: boolean) => void;
   setDialog: (d: Dialog) => void;
   setMenu: (m: MenuState | null) => void;
   pushToast: (kind: Toast["kind"], text: string) => void;
@@ -43,6 +46,7 @@ interface UiState {
 
 const THEME_KEY = "localfiles.theme";
 const HIDDEN_KEY = "localfiles.showHidden";
+const PREVIEW_KEY = "localfiles.preview";
 
 function loadTheme(): Theme {
   const v = localStorage.getItem(THEME_KEY);
@@ -66,6 +70,7 @@ export const useUi = create<UiState>((set) => ({
   theme: loadTheme(),
   settingsOpen: false,
   showHidden: localStorage.getItem(HIDDEN_KEY) === "1",
+  previewOpen: localStorage.getItem(PREVIEW_KEY) === "1",
   dialog: null,
   menu: null,
   toasts: [],
@@ -79,6 +84,10 @@ export const useUi = create<UiState>((set) => ({
   setShowHidden: (showHidden) => {
     localStorage.setItem(HIDDEN_KEY, showHidden ? "1" : "0");
     set({ showHidden });
+  },
+  setPreviewOpen: (previewOpen) => {
+    localStorage.setItem(PREVIEW_KEY, previewOpen ? "1" : "0");
+    set({ previewOpen });
   },
   setDialog: (dialog) => set({ dialog }),
   setMenu: (menu) => set({ menu }),

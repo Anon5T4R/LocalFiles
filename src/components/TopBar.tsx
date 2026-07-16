@@ -1,20 +1,33 @@
 import { useEffect, useRef, useState } from "react";
+import * as actions from "../lib/actions";
 import { breadcrumbOf } from "../lib/fsutil";
 import { t } from "../lib/i18n";
 import { useFiles } from "../state/tabs";
 import { useUi } from "../state/ui";
 
-/** Barra superior: navegação, breadcrumb (clica pra editar), visão e config. */
+/**
+ * Barra superior: navegação, breadcrumb (clica pra editar; segmento aceita
+ * drop), busca (Ctrl+F), nova pasta, ocultos, preview, favorito, visão, config.
+ */
 export default function TopBar() {
   const tab = useFiles((s) => s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]);
   const view = useFiles((s) => s.view);
-  const { navigate, goBack, goForward, goUp, refresh, setView } = useFiles.getState();
+  const search = useFiles((s) => s.search);
+  const isFav = useFiles((s) => s.favorites.some((f) => f.path === tab.path));
+  const { navigate, goBack, goForward, goUp, refresh, setView, startOp, toggleFavorite } =
+    useFiles.getState();
+  const showHidden = useUi((s) => s.showHidden);
+  const previewOpen = useUi((s) => s.previewOpen);
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const pushToast = useUi((s) => s.pushToast);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.path);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const [query, setQuery] = useState("");
+  const [inContent, setInContent] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -24,17 +37,27 @@ export default function TopBar() {
     }
   }, [editing, tab.path]);
 
-  // Ctrl+L abre a edição de caminho (padrão de navegador/Explorer).
+  // Ctrl+L edita o caminho; Ctrl+F foca a busca (padrão navegador/Explorer).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
         setEditing(true);
       }
+      if (e.ctrlKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Busca fechada por fora (navegou): limpa o campo.
+  useEffect(() => {
+    if (!search) setQuery("");
+  }, [search]);
 
   const submitPath = async () => {
     setEditing(false);
@@ -48,6 +71,28 @@ export default function TopBar() {
       pushToast("error", t("toast.invalidPath", { path: target }));
     }
   };
+
+  const submitSearch = () => {
+    const q = query.trim();
+    if (!q) return;
+    void useFiles.getState().startSearch(q, inContent);
+  };
+
+  /** Segmento do breadcrumb aceita drop (mover pro ancestral; Ctrl = copiar). */
+  const crumbDrop = (destDir: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes("application/x-localfiles")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
+      }
+    },
+    onDrop: (e: React.DragEvent) => {
+      const raw = e.dataTransfer.getData("application/x-localfiles");
+      if (!raw) return;
+      e.preventDefault();
+      void startOp(JSON.parse(raw), destDir, !e.ctrlKey);
+    },
+  });
 
   const crumbs = breadcrumbOf(tab.path);
 
@@ -87,7 +132,6 @@ export default function TopBar() {
         />
       ) : (
         <div className="breadcrumb" title={t("nav.editPath")} onClick={(e) => {
-          // Clique no "vazio" da barra = editar; clique num segmento navega.
           if (e.target === e.currentTarget) setEditing(true);
         }}>
           {crumbs.map((c, i) => (
@@ -96,7 +140,11 @@ export default function TopBar() {
               <button
                 className="crumb"
                 onClick={() => void navigate(c.path)}
+                onAuxClick={(e) => {
+                  if (e.button === 1) useFiles.getState().newTab(c.path);
+                }}
                 title={c.path}
+                {...crumbDrop(c.path)}
               >
                 {c.name}
               </button>
@@ -106,7 +154,60 @@ export default function TopBar() {
         </div>
       )}
 
+      <div className="searchbox">
+        <input
+          ref={searchRef}
+          value={query}
+          placeholder={t("search.placeholder")}
+          spellCheck={false}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitSearch();
+            if (e.key === "Escape") {
+              setQuery("");
+              useFiles.getState().clearSearch();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+        <label className="search-content" title={t("search.inContentTitle")}>
+          <input
+            type="checkbox"
+            checked={inContent}
+            onChange={(e) => setInContent(e.target.checked)}
+          />
+          {t("search.inContent")}
+        </label>
+      </div>
+
       <div className="topbar-actions">
+        <button title={t("topbar.newFolder")} onClick={() => actions.askNewFolder()}>
+          📁+
+        </button>
+        <button
+          className={isFav ? "active" : ""}
+          title={t("topbar.favTitle")}
+          onClick={() => toggleFavorite(tab.path)}
+        >
+          {isFav ? "★" : "☆"}
+        </button>
+        <button
+          className={showHidden ? "active" : ""}
+          title={t("topbar.showHidden")}
+          onClick={() => {
+            useUi.getState().setShowHidden(!showHidden);
+            void refresh();
+          }}
+        >
+          👁
+        </button>
+        <button
+          className={previewOpen ? "active" : ""}
+          title={t("preview.toggle")}
+          onClick={() => useUi.getState().setPreviewOpen(!previewOpen)}
+        >
+          ◧
+        </button>
         <div className="view-switch" role="group">
           <button
             className={view === "details" ? "active" : ""}

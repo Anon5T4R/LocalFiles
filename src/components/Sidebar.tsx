@@ -22,14 +22,15 @@ const PLACE_ICON: Record<string, string> = {
   videos: "🎬",
 };
 
-/** Sidebar: locais conhecidos + unidades (com barra de espaço usado). */
+/** Sidebar: locais conhecidos + favoritos + unidades (barra de espaço usado). */
 export default function Sidebar() {
   const places = useFiles((s) => s.places);
   const drives = useFiles((s) => s.drives);
+  const favorites = useFiles((s) => s.favorites);
   const current = useFiles(
     (s) => (s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]).path,
   );
-  const { navigate, startOp } = useFiles.getState();
+  const { navigate, startOp, toggleFavorite } = useFiles.getState();
 
   /** Soltar itens arrastados num destino da sidebar = mover (Ctrl = copiar). */
   const dropHandlers = (destDir: string) => ({
@@ -63,6 +64,32 @@ export default function Sidebar() {
           <span className="side-name">{PLACE_LABEL[p.id] ? t(PLACE_LABEL[p.id]) : p.id}</span>
         </button>
       ))}
+
+      {favorites.length > 0 && (
+        <>
+          <div className="side-title">{t("side.favorites")}</div>
+          {favorites.map((f) => (
+            <div key={f.path} className="side-fav-wrap">
+              <button
+                className={`side-item ${current === f.path ? "active" : ""}`}
+                onClick={() => void navigate(f.path)}
+                title={f.path}
+                {...dropHandlers(f.path)}
+              >
+                <span className="side-icon">★</span>
+                <span className="side-name">{f.name}</span>
+              </button>
+              <button
+                className="side-fav-remove"
+                title={t("menu.removeFavorite")}
+                onClick={() => toggleFavorite(f.path)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </>
+      )}
 
       <div className="side-title">{t("side.drives")}</div>
       {drives.map((d) => {

@@ -2,13 +2,14 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import * as actions from "./lib/actions";
-import { getStartupDir } from "./lib/backend";
+import { getStartupDir, isTauri, watchDir } from "./lib/backend";
 import { t } from "./lib/i18n";
-import type { OpDone, OpProgress } from "./lib/types";
+import type { OpDone, OpProgress, SearchBatch, SearchDone } from "./lib/types";
 import ContextMenu from "./components/ContextMenu";
 import FileList from "./components/FileList";
 import Modals from "./components/Modals";
 import OpsPanel from "./components/OpsPanel";
+import PreviewPanel from "./components/PreviewPanel";
 import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
 import StatusBar from "./components/StatusBar";
@@ -18,8 +19,9 @@ import Toasts from "./components/Toasts";
 import { FALLBACK_DIR, useFiles } from "./state/tabs";
 import { useUi } from "./state/ui";
 
-/** Rodando dentro do Tauri? (o smoke em navegador puro não tem a ponte). */
-const isTauri = "__TAURI_INTERNALS__" in window;
+/** Type-ahead: digitar seleciona o primeiro item que começa com o prefixo. */
+let typeBuffer = "";
+let typeTimer: number | undefined;
 
 export default function App() {
   // Boot: sidebar + pasta inicial (argumento do launch > home > C:\).
@@ -33,7 +35,7 @@ export default function App() {
     });
   }, []);
 
-  // Eventos do back-end: progresso/fim das transferências + open-dir (2ª instância).
+  // Eventos do back-end: transferências, busca, watcher e 2ª instância.
   useEffect(() => {
     if (!isTauri) return;
     const un1 = listen<OpProgress>("fileop-progress", (e) => {
@@ -53,19 +55,29 @@ export default function App() {
     const un3 = listen<string>("open-dir", (e) => {
       useFiles.getState().newTab(e.payload);
     });
-    // Arrastar arquivos DE FORA (Explorer → LocalFiles): copia pra pasta atual.
+    // Arrastar arquivos DE FORA (Explorer/Nautilus → LocalFiles): copia pra pasta atual.
     const un4 = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop" && event.payload.paths.length > 0) {
         const files = useFiles.getState();
-        const dest = files.activeTab().path;
-        void files.startOp(event.payload.paths, dest, false);
+        void files.startOp(event.payload.paths, files.activeTab().path, false);
+      }
+    });
+    // Busca: lotes de resultado + fim.
+    const un5 = listen<SearchBatch>("search-result", (e) => {
+      useFiles.getState().appendSearchResults(e.payload.opId, e.payload.entries);
+    });
+    const un6 = listen<SearchDone>("search-done", (e) => {
+      useFiles.getState().finishSearch(e.payload.opId, e.payload.truncated);
+    });
+    // Watcher: a pasta ativa mudou por fora → refresh silencioso.
+    const un7 = listen<string>("dir-changed", (e) => {
+      const files = useFiles.getState();
+      if (e.payload === files.activeTab().path && !files.search) {
+        void files.refresh({ silent: true });
       }
     });
     return () => {
-      void un1.then((f) => f());
-      void un2.then((f) => f());
-      void un3.then((f) => f());
-      void un4.then((f) => f());
+      for (const un of [un1, un2, un3, un4, un5, un6, un7]) void un.then((f) => f());
     };
   }, []);
 
@@ -76,6 +88,7 @@ export default function App() {
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) return;
       const files = useFiles.getState();
       const tab = files.activeTab();
+      const entries = files.visibleEntries();
       const key = e.key.toLowerCase();
 
       if (e.ctrlKey && key === "t") { e.preventDefault(); files.newTab(); return; }
@@ -84,19 +97,73 @@ export default function App() {
       if (e.ctrlKey && key === "c") { e.preventDefault(); actions.copySelection(false); return; }
       if (e.ctrlKey && key === "x") { e.preventDefault(); actions.copySelection(true); return; }
       if (e.ctrlKey && key === "v") { e.preventDefault(); actions.paste(); return; }
+      if (e.ctrlKey && key === "d") { e.preventDefault(); files.toggleFavorite(tab.path); return; }
       if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); files.goBack(); return; }
       if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); files.goForward(); return; }
+      if (e.altKey && key === "p") {
+        e.preventDefault();
+        const ui = useUi.getState();
+        ui.setPreviewOpen(!ui.previewOpen);
+        return;
+      }
       if (e.key === "F5") { e.preventDefault(); void files.refresh(); return; }
       if (e.key === "F2") { e.preventDefault(); actions.startRename(); return; }
       if (e.key === "Delete") { e.preventDefault(); actions.askDelete(); return; }
       if (e.key === "Backspace") { e.preventDefault(); files.goUp(); return; }
+      if (e.key === "Escape") { files.setSelection([], null, null); return; }
       if (e.key === "Enter" && tab.selection.length === 1) {
-        const entry = tab.entries.find((x) => x.path === tab.selection[0]);
+        const entry = entries.find((x) => x.path === tab.selection[0]);
         if (entry) { e.preventDefault(); actions.openEntry(entry); }
+        return;
+      }
+
+      // Navegação por setas (Shift estende a partir da âncora).
+      const NAV: Record<string, number> = {
+        ArrowDown: 1,
+        ArrowUp: -1,
+        PageDown: 20,
+        PageUp: -20,
+      };
+      if (e.key in NAV || e.key === "Home" || e.key === "End") {
+        if (entries.length === 0) return;
+        e.preventDefault();
+        const cur = tab.focusIdx ?? -1;
+        let next: number;
+        if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = entries.length - 1;
+        else next = Math.min(entries.length - 1, Math.max(0, cur + NAV[e.key]));
+        if (e.shiftKey && tab.anchor !== null) {
+          const [a, b] = [Math.min(tab.anchor, next), Math.max(tab.anchor, next)];
+          files.setSelection(entries.slice(a, b + 1).map((x) => x.path), undefined, next);
+        } else {
+          files.setSelection([entries[next].path], next, next);
+        }
+        return;
+      }
+
+      // Type-ahead: letras/números pulam pro item com aquele prefixo.
+      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        typeBuffer += e.key.toLowerCase();
+        window.clearTimeout(typeTimer);
+        typeTimer = window.setTimeout(() => (typeBuffer = ""), 800);
+        const idx = entries.findIndex((x) => x.name.toLowerCase().startsWith(typeBuffer));
+        if (idx >= 0) files.setSelection([entries[idx].path], idx, idx);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Reobserva a pasta ativa quando o app volta do 2º plano (watcher barato).
+  useEffect(() => {
+    if (!isTauri) return;
+    const onFocus = () => {
+      const files = useFiles.getState();
+      void watchDir(files.activeTab().path).catch(() => {});
+      void files.refresh({ silent: true });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   return (
@@ -106,7 +173,10 @@ export default function App() {
       <div className="main">
         <Sidebar />
         <div className="content">
-          <FileList />
+          <div className="content-row">
+            <FileList />
+            <PreviewPanel />
+          </div>
           <StatusBar />
         </div>
       </div>

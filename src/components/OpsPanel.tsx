@@ -1,4 +1,4 @@
-import { cancelTransfer } from "../lib/backend";
+import { cancelOp } from "../lib/backend";
 import { formatBytes } from "../lib/fsutil";
 import { t } from "../lib/i18n";
 import { useFiles } from "../state/tabs";
@@ -25,7 +25,7 @@ export default function OpsPanel() {
                   total: p ? formatBytes(p.totalBytes) : "…",
                 })}
               </span>
-              <button className="op-cancel" onClick={() => void cancelTransfer(op.opId)}>
+              <button className="op-cancel" onClick={() => void cancelOp(op.opId)}>
                 {t("ops.cancel")}
               </button>
             </div>

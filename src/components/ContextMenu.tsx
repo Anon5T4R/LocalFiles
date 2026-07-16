@@ -38,11 +38,13 @@ export default function ContextMenu() {
 
   const files = useFiles.getState();
   const tab = files.activeTab();
+  const entries = files.visibleEntries();
   const target = menu.targetPath
-    ? tab.entries.find((e) => e.path === menu.targetPath) ?? null
+    ? entries.find((e) => e.path === menu.targetPath) ?? null
     : null;
   const sel = tab.selection;
   const single = sel.length === 1 && target !== null;
+  const multi = sel.length > 1;
 
   const item = (
     label: string,
@@ -78,11 +80,15 @@ export default function ContextMenu() {
               disabled: !clipboard,
             })}
           <div className="menu-sep" />
-          {item(t("menu.rename"), () => actions.startRename(target.path), {
-            disabled: !single,
-          })}
+          {single && item(t("menu.rename"), () => actions.startRename(target.path))}
+          {multi && item(t("menu.batchRename"), () => actions.askBatchRename())}
           {item(t("menu.delete"), () => actions.askDelete(), { danger: true })}
           <div className="menu-sep" />
+          {target.isDir &&
+            item(
+              files.isFavorite(target.path) ? t("menu.removeFavorite") : t("menu.addFavorite"),
+              () => files.toggleFavorite(target.path),
+            )}
           {item(t("menu.copyPath"), () => void actions.copyPathToClipboard(target.path))}
           {item(t("menu.properties"), () => actions.showProperties(target.path))}
         </>
