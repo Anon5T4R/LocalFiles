@@ -158,8 +158,10 @@ fn validate_name(name: &str) -> Result<(), String> {
     if trimmed.chars().any(|c| bad.contains(&c) || (c as u32) < 0x20) {
         return Err("o nome contém caracteres inválidos".into());
     }
-    if trimmed.ends_with('.') || trimmed.ends_with(' ') {
-        return Err("o nome não pode terminar em ponto ou espaço".into());
+    // Espaços nas pontas são aparados pelos comandos (create/rename usam
+    // `name.trim()`); ponto final não é aparável e o Windows rejeita.
+    if trimmed.ends_with('.') {
+        return Err("o nome não pode terminar em ponto".into());
     }
     Ok(())
 }
@@ -379,7 +381,8 @@ mod tests {
         assert!(validate_name("a\\b").is_err());
         assert!(validate_name("con?").is_err());
         assert!(validate_name("termina.").is_err());
-        assert!(validate_name("termina ").is_err());
+        // Espaço nas pontas é aparado (não é erro): "termina " vira "termina".
+        assert!(validate_name("termina ").is_ok());
     }
 
     #[test]
