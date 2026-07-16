@@ -3,8 +3,22 @@
 Gerenciador de arquivos **100% offline** da suíte Local — o "shell" que faltava:
 navegar, organizar, copiar e mover arquivos sem depender do Explorer.
 
-## Recursos (v0.1)
+## Recursos
 
+**v0.2**
+- **Busca** na pasta atual (Ctrl+F): por nome e, opcionalmente, **dentro do
+  conteúdo** dos arquivos de texto — resultados em streaming, cancelável
+- **Painel de preview** (Alt+P): imagem, começo de texto/código, infos
+- **Miniaturas de imagem** na grade (cache em disco)
+- **Atualização ao vivo**: mudou por fora (outro app), a lista atualiza sozinha
+- **Lista virtualizada** — pastas com dezenas de milhares de itens sem engasgo
+- **Renomear em lote** (F2 com vários selecionados): localizar/substituir com
+  regex opcional OU padrão com contador, prévia ao vivo e bloqueio de conflito
+- **Favoritos** na sidebar (Ctrl+D favorita a pasta atual)
+- **Navegação por teclado**: setas/PageUp/Home (Shift estende), type-ahead
+  (digitar já seleciona), drop no breadcrumb, barra de uso do disco no rodapé
+
+**v0.1**
 - **Navegação com abas** (Ctrl+T/Ctrl+W) + breadcrumb clicável (Ctrl+L edita o caminho)
 - **Três visões:** detalhes (colunas ordenáveis), lista e grade
 - **Operações:** copiar/recortar/colar (Ctrl+C/X/V), renomear (F2), nova pasta,
@@ -22,8 +36,9 @@ TaylorHub são respeitadas. O LocalFiles **não rouba** nenhuma associação.
 ## Stack
 
 Tauri 2 + React 19 + Vite + TypeScript no front; Rust no back
-(`trash` pra lixeira, `sysinfo` pros volumes, motor próprio de cópia com
-progresso/cancelamento). Sem sidecar, sem rede.
+(`trash` pra lixeira, `sysinfo` pros volumes, `jwalk` na busca, `notify` no
+watcher, `image` nas miniaturas, motor próprio de cópia com progresso e
+cancelamento). Sem sidecar, sem rede.
 
 ## Dev
 
