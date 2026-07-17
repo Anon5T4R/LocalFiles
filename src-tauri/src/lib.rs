@@ -253,25 +253,29 @@ fn cancel_op(state: State<'_, OpsState>, op_id: u64) {
 // ---------- busca / watcher / lote (v0.2) ----------
 
 /// Dispara a busca recursiva; resultados via `search-result`/`search-done`.
+/// O `op_id` vem do FRONT (gerado síncrono antes do invoke) pra que o estado
+/// da busca já nasça com o id certo — senão eventos emitidos antes da promise
+/// resolver eram descartados (busca rápida = zero resultados + spinner eterno).
 #[tauri::command(async)]
 fn start_search(
     app: AppHandle,
     state: State<'_, OpsState>,
+    op_id: u64,
     root: String,
     query: String,
     in_content: bool,
     show_hidden: bool,
-) -> Result<u64, String> {
+) -> Result<(), String> {
     if query.trim().is_empty() {
         return Err("busca vazia".into());
     }
-    let (op_id, cancel) = state.register();
+    let cancel = state.register_with_id(op_id);
     let handle = app.clone();
     std::thread::spawn(move || {
         search::run_search(handle.clone(), op_id, cancel, root, query, in_content, show_hidden);
         handle.state::<OpsState>().finish(op_id);
     });
-    Ok(op_id)
+    Ok(())
 }
 
 /// Observa a pasta da aba ativa (`dir-changed` debounced quando muda por fora).

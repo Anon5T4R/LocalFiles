@@ -31,6 +31,17 @@ impl OpsState {
         (id, flag)
     }
 
+    /// Registra uma operação com id escolhido pelo CHAMADOR. A busca usa isso:
+    /// o front gera o op_id de forma síncrona antes do invoke, senão os
+    /// primeiros eventos `search-result`/`search-done` chegam antes da promise
+    /// resolver e são descartados por opId desconhecido. Os ids do front vivem
+    /// numa faixa própria (>= 2^32) pra nunca colidir com os do `register()`.
+    pub fn register_with_id(&self, id: u64) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.ops.lock().unwrap().insert(id, flag.clone());
+        flag
+    }
+
     pub fn cancel(&self, id: u64) {
         if let Some(f) = self.ops.lock().unwrap().get(&id) {
             f.store(true, Ordering::Relaxed);

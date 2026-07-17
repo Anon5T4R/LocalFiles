@@ -373,17 +373,21 @@ export const useFiles = create<FilesState>((set, get) => {
 
     startSearch: async (query, inContent) => {
       const prev = get().search;
-      if (prev?.opId != null) void backend.cancelOp(prev.opId).catch(() => {});
+      if (prev) void backend.cancelOp(prev.opId).catch(() => {});
       const root = get().activeTab().path;
       const showHidden = useUi.getState().showHidden;
+      // O opId nasce AQUI, síncrono, e vai como argumento pro Rust: o estado
+      // já começa com o id certo e nenhum `search-result`/`search-done` que
+      // chegue antes da promise do invoke resolver é descartado.
+      const opId = backend.newSearchOpId();
       set({
-        search: { root, query, inContent, running: true, opId: null, results: [], truncated: false },
+        search: { root, query, inContent, running: true, opId, results: [], truncated: false },
       });
       try {
-        const opId = await backend.startSearch(root, query, inContent, showHidden);
-        set((s) => (s.search ? { search: { ...s.search, opId } } : {}));
+        await backend.startSearch(opId, root, query, inContent, showHidden);
       } catch (e) {
-        set({ search: null });
+        // Só limpa se ainda for ESTA busca (outra pode ter começado enquanto isso).
+        set((s) => (s.search?.opId === opId ? { search: null } : {}));
         useUi.getState().pushToast("error", String(e));
       }
     },
@@ -405,7 +409,7 @@ export const useFiles = create<FilesState>((set, get) => {
     clearSearch: () => {
       const prev = get().search;
       if (!prev) return;
-      if (prev.opId != null) void backend.cancelOp(prev.opId).catch(() => {});
+      void backend.cancelOp(prev.opId).catch(() => {});
       set({ search: null });
     },
 

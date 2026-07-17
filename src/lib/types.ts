@@ -115,7 +115,8 @@ export interface SearchState {
   query: string;
   inContent: boolean;
   running: boolean;
-  opId: number | null;
+  /** Gerado no front (síncrono) e passado ao Rust — nunca null. */
+  opId: number;
   results: Entry[];
   truncated: boolean;
 }

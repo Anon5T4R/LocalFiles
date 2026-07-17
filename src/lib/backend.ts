@@ -57,13 +57,23 @@ export function getStartupDir(): Promise<string | null> {
 
 // ---------- v0.2 ----------
 
+/** Ids de busca gerados NO FRONT (faixa >= 2^32, sem colidir com os ids que o
+ *  Rust gera pra transferências). Gerar o id síncrono antes do invoke evita a
+ *  corrida em que `search-result`/`search-done` chegam antes da promise do
+ *  invoke resolver e eram descartados por opId desconhecido. */
+let nextSearchOpId = 2 ** 32;
+export function newSearchOpId(): number {
+  return nextSearchOpId++;
+}
+
 export function startSearch(
+  opId: number,
   root: string,
   query: string,
   inContent: boolean,
   showHidden: boolean,
-): Promise<number> {
-  return invoke("start_search", { root, query, inContent, showHidden });
+): Promise<void> {
+  return invoke("start_search", { opId, root, query, inContent, showHidden });
 }
 
 export function watchDir(path: string): Promise<void> {
