@@ -1,6 +1,6 @@
 [package]
 name = "localfiles"
-version = "0.4.2"
+version = "0.4.3"
 description = "LocalFiles — gerenciador de arquivos 100% offline da suíte Local"
 authors = ["Taylor"]
 edition = "2021"
