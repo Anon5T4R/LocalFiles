@@ -74,12 +74,27 @@ export function askNewFolder() {
   useUi.getState().setDialog({ kind: "newFolder" });
 }
 
+export function askNewFile() {
+  useUi.getState().setDialog({ kind: "newFile" });
+}
+
 export async function confirmNewFolder(name: string) {
+  await createEntry(name, false);
+}
+
+export async function confirmNewFile(name: string) {
+  await createEntry(name, true);
+}
+
+async function createEntry(name: string, file: boolean) {
   const ui = useUi.getState();
   const files = useFiles.getState();
   ui.setDialog(null);
   try {
-    const created = await backend.createFolder(files.activeTab().path, name);
+    const dir = files.activeTab().path;
+    const created = file
+      ? await backend.createFile(dir, name)
+      : await backend.createFolder(dir, name);
     const createdName = created.split(/[\\/]/).pop() ?? name;
     ui.pushToast("ok", t("toast.created", { name: createdName }));
     await files.refresh();

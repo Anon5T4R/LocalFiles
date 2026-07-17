@@ -184,6 +184,9 @@ export default function TopBar() {
         <button title={t("topbar.newFolder")} onClick={() => actions.askNewFolder()}>
           📁+
         </button>
+        <button title={t("topbar.newFile")} onClick={() => actions.askNewFile()}>
+          📄+
+        </button>
         <button
           className={isFav ? "active" : ""}
           title={t("topbar.favTitle")}

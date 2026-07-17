@@ -183,6 +183,19 @@ fn create_folder(parent: String, name: String) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
+fn create_file(parent: String, name: String) -> Result<String, String> {
+    validate_name(&name)?;
+    let target = ops::unique_target(&Path::new(&parent).join(name.trim()));
+    // create_new: nunca sobrescreve (unique_target já evita colisão, mas garante).
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|e| format!("{}: {}", target.display(), e))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[tauri::command(async)]
 fn rename_entry(path: String, new_name: String) -> Result<String, String> {
     validate_name(&new_name)?;
     let src = PathBuf::from(&path);
@@ -424,6 +437,7 @@ pub fn run() {
             list_drives,
             known_folders,
             create_folder,
+            create_file,
             rename_entry,
             delete_to_trash,
             start_transfer,

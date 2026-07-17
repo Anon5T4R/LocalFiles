@@ -256,6 +256,25 @@ input:focus {
   background: transparent;
   padding: 7px 8px;
   border-radius: 8px;
+  cursor: pointer;
+}
+.side-item.tree {
+  gap: 4px;
+}
+.tree-toggle {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85em;
+  border-radius: 4px;
+}
+.tree-toggle:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+.tree-toggle.loading {
+  opacity: 0.6;
 }
 .side-item:hover {
   background: var(--panel);

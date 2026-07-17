@@ -96,6 +96,7 @@ export default function ContextMenu() {
         <>
           {item(t("menu.paste"), () => actions.paste(), { disabled: !clipboard })}
           {item(t("menu.newFolder"), () => actions.askNewFolder())}
+          {item(t("menu.newFile"), () => actions.askNewFile())}
           <div className="menu-sep" />
           {item(t("menu.selectAll"), () => actions.selectAll())}
           {item(t("menu.refresh"), () => void files.refresh())}

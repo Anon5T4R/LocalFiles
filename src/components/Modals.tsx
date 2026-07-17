@@ -25,7 +25,8 @@ export default function Modals() {
   return (
     <div className="modal-backdrop" onClick={() => setDialog(null)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {dialog.kind === "newFolder" && <NewFolderDialog />}
+        {dialog.kind === "newFolder" && <NewEntryDialog file={false} />}
+        {dialog.kind === "newFile" && <NewEntryDialog file={true} />}
         {dialog.kind === "delete" && (
           <DeleteDialog paths={dialog.paths} firstName={dialog.firstName} />
         )}
@@ -36,40 +37,46 @@ export default function Modals() {
   );
 }
 
-function NewFolderDialog() {
+function NewEntryDialog({ file }: { file: boolean }) {
   const setDialog = useUi((s) => s.setDialog);
   const entries = useFiles((s) => (s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]).entries);
   const existing = new Set(entries.map((e) => e.name.toLowerCase()));
-  const [name, setName] = useState(() => uniqueName(t("dlg.defaultFolderName"), existing));
+  const defaultName = file ? t("dlg.defaultFileName") : t("dlg.defaultFolderName");
+  const [name, setName] = useState(() => uniqueName(defaultName, existing));
   const ref = useRef<HTMLInputElement>(null);
+  const confirm = () => {
+    if (!name.trim()) return;
+    if (file) void actions.confirmNewFile(name);
+    else void actions.confirmNewFolder(name);
+  };
 
   useEffect(() => {
     ref.current?.focus();
-    ref.current?.select();
+    // Seleciona só o nome-base (sem a extensão) pra digitar por cima.
+    const dot = file ? name.lastIndexOf(".") : -1;
+    if (dot > 0) ref.current?.setSelectionRange(0, dot);
+    else ref.current?.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <>
-      <h2>{t("dlg.newFolderTitle")}</h2>
+      <h2>{file ? t("dlg.newFileTitle") : t("dlg.newFolderTitle")}</h2>
       <label className="field">
-        <span>{t("dlg.newFolderName")}</span>
+        <span>{file ? t("dlg.newFileName") : t("dlg.newFolderName")}</span>
         <input
           ref={ref}
           value={name}
           spellCheck={false}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && name.trim()) void actions.confirmNewFolder(name);
+            if (e.key === "Enter") confirm();
           }}
         />
       </label>
       <div className="modal-actions">
         <button onClick={() => setDialog(null)}>{t("dlg.cancel")}</button>
-        <button
-          className="primary"
-          disabled={!name.trim()}
-          onClick={() => void actions.confirmNewFolder(name)}
-        >
+        <button className="primary" disabled={!name.trim()} onClick={confirm}>
           {t("dlg.create")}
         </button>
       </div>

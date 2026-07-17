@@ -12,6 +12,7 @@ export interface Toast {
 /** Diálogo modal ativo (um por vez). */
 export type Dialog =
   | { kind: "newFolder" }
+  | { kind: "newFile" }
   | { kind: "rename"; path: string; name: string }
   | { kind: "delete"; paths: string[]; firstName: string }
   | { kind: "properties"; path: string; props: Properties | null }

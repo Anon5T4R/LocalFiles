@@ -22,6 +22,10 @@ export function createFolder(parent: string, name: string): Promise<string> {
   return invoke("create_folder", { parent, name });
 }
 
+export function createFile(parent: string, name: string): Promise<string> {
+  return invoke("create_file", { parent, name });
+}
+
 export function renameEntry(path: string, newName: string): Promise<string> {
   return invoke("rename_entry", { path, newName });
 }
