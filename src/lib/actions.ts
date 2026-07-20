@@ -1,5 +1,6 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import * as backend from "./backend";
+import { isSupportedArchive, isVirtual, joinVirtual, splitVirtual } from "./apath";
 import { t } from "./i18n";
 import type { Entry } from "./types";
 import { useFiles } from "../state/tabs";
@@ -16,10 +17,43 @@ export function openEntry(entry: Entry) {
     void files.navigate(entry.path);
     return;
   }
-  // Arquivo: app padrão do SO (respeita as associações registradas pelo Hub).
+  // Arquivo compactado: ENTRA nele como se fosse pasta (o pedido do item B4).
+  // Quem quiser abrir no app padrão tem o "Abrir com…" do menu de contexto —
+  // e é por isso que esse item continua existindo pra arquivo compactado.
+  if (!isVirtual(entry.path) && isSupportedArchive(entry.path)) {
+    void files.navigate(joinVirtual(entry.path, ""));
+    return;
+  }
+  // Item DENTRO de um arquivo: não há caminho de disco pra entregar ao SO.
+  // Extrair pro temporário e abrir dali seria mentir sobre onde o arquivo está
+  // (editar não voltaria pro zip), então a UI diz o que fazer em vez de fingir.
+  if (isVirtual(entry.path)) {
+    useUi.getState().pushToast("info", t("arch.extractFirst"));
+    return;
+  }
+  // Arquivo comum: app padrão do SO (respeita as associações do Hub).
   openPath(entry.path).catch((e) =>
     useUi.getState().pushToast("error", t("toast.openFailed", { error: String(e) })),
   );
+}
+
+/** Abre o arquivo compactado no app padrão (o LocalZip, normalmente). */
+export function openArchiveExternally(path: string) {
+  openPath(path).catch((e) =>
+    useUi.getState().pushToast("error", t("toast.openFailed", { error: String(e) })),
+  );
+}
+
+/** Extrai a seleção (que está dentro de um arquivo) pro outro painel. */
+export function extractSelection() {
+  const files = useFiles.getState();
+  const sel = files.activeTab().selection;
+  if (sel.length === 0) return;
+  if (!files.dual) {
+    useUi.getState().pushToast("info", t("arch.needDualToExtract"));
+    return;
+  }
+  void files.transferToOtherPane(false);
 }
 
 export function openWith(path: string) {
@@ -61,8 +95,16 @@ export function askDelete(paths?: string[]) {
 export async function confirmDelete(paths: string[]) {
   const ui = useUi.getState();
   ui.setDialog(null);
+  // Excluir DENTRO de um arquivo compactado é trabalho do LocalZip (lá o
+  // `remove` já existe e reconstrói sem re-extrair). Aqui a lixeira do SO não
+  // alcança um item que não tem caminho de disco.
+  if (paths.some(isVirtual)) {
+    ui.pushToast("error", t("arch.noDelete"));
+    return;
+  }
   try {
     await backend.deleteToTrash(paths);
+    useFiles.getState().forgetTags(paths); // etiqueta de item que sumiu não fica
     ui.pushToast("ok", t("toast.deleted", { n: paths.length }));
   } catch (e) {
     ui.pushToast("error", t("toast.deleteFailed", { error: String(e) }));
@@ -128,8 +170,14 @@ export async function confirmRename(path: string, newName: string) {
   files.setRenaming(null);
   const oldName = path.split(/[\\/]/).pop() ?? "";
   if (!newName.trim() || newName === oldName) return;
+  if (isVirtual(path)) {
+    ui.pushToast("error", t("arch.noRename"));
+    return;
+  }
   try {
     const renamed = await backend.renameEntry(path, newName);
+    // A etiqueta segue o arquivo (inclusive a dos filhos, se era pasta).
+    files.movedTags(path, renamed);
     ui.pushToast("ok", t("toast.renamed", { name: newName }));
     await files.refresh();
     files.setSelection([renamed]);
@@ -168,3 +216,19 @@ export function selectAll() {
   const files = useFiles.getState();
   files.setSelection(files.visibleEntries().map((e) => e.path));
 }
+
+/** Abre o diálogo de etiquetas pra seleção atual. */
+export function askTags(paths?: string[]) {
+  const files = useFiles.getState();
+  const sel = paths ?? files.activeTab().selection;
+  if (sel.length === 0) return;
+  useUi.getState().setDialog({ kind: "tags", paths: sel });
+}
+
+/** Copia/move a seleção pro painel de trás (o gesto central do painel duplo). */
+export function transferToOtherPane(isMove: boolean) {
+  void useFiles.getState().transferToOtherPane(isMove);
+}
+
+/** O caminho aponta pra dentro de um arquivo compactado? (reexport pra UI) */
+export { isVirtual, splitVirtual, isSupportedArchive };

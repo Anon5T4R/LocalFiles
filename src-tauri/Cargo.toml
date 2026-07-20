@@ -1,6 +1,6 @@
 [package]
 name = "localfiles"
-version = "0.4.3"
+version = "0.5.0"
 description = "LocalFiles — gerenciador de arquivos 100% offline da suíte Local"
 authors = ["Taylor"]
 edition = "2021"
@@ -33,6 +33,18 @@ notify = "8"
 # Miniaturas de imagem pro grid/preview (reusa decoders; mesmo crate do LocalImage).
 image = "0.25"
 base64 = "0.22"
+# Zip inline (v0.5): o MESMO conjunto de crates do LocalZip 0.5.0 — os módulos
+# `archive.rs`/`split.rs`/`rar.rs` vieram de lá (ver o cabeçalho de cada um).
+# Manter as versões alinhadas com o LocalZip é de propósito: bug achado num app
+# se conserta no outro copiando a correção, sem tradução de API no meio.
+zip = { version = "2", features = ["aes-crypto", "deflate", "bzip2", "zstd", "time"] }
+tar = "0.4"
+flate2 = "1"
+xz2 = "0.1"
+bzip2 = "0.5"
+zstd = "0.13"
+sevenz-rust2 = "0.21.3"
+rars = "0.4"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

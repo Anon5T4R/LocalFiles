@@ -17,7 +17,7 @@ const TEXT_HEAD_BYTES = 64 * 1024;
  */
 export default function PreviewPanel() {
   const open = useUi((s) => s.previewOpen);
-  const tab = useFiles((s) => s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]);
+  const tab = useFiles((s) => s.activeTab());
   const search = useFiles((s) => s.search);
 
   if (!open) return null;

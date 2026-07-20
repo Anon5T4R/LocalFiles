@@ -91,3 +91,33 @@ export function thumbnail(path: string, maxDim: number): Promise<string | null> 
 export function readTextHead(path: string, maxBytes: number): Promise<TextHead> {
   return invoke("read_text_head", { path, maxBytes });
 }
+
+// ---------- zip inline (v0.5) ----------
+
+/** O arquivo de disco é um compactado que sabemos abrir? */
+export function archiveSupported(path: string): Promise<boolean> {
+  return invoke("archive_supported", { path });
+}
+
+/** Lista uma "pasta" dentro de um arquivo (recebe o caminho VIRTUAL). */
+export function archiveList(path: string): Promise<Entry[]> {
+  return invoke("archive_list", { path });
+}
+
+/** Extrai itens do arquivo pra uma pasta do disco. Devolve o op_id. */
+export function archiveExtract(
+  archivePath: string,
+  inners: string[],
+  destDir: string,
+): Promise<number> {
+  return invoke("archive_extract", { archivePath, inners, destDir });
+}
+
+/** Acrescenta arquivos do disco dentro de um zip. Devolve o op_id. */
+export function archiveAdd(
+  archivePath: string,
+  sources: string[],
+  innerDir: string,
+): Promise<number> {
+  return invoke("archive_add", { archivePath, sources, innerDir });
+}

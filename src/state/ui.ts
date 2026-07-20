@@ -25,6 +25,7 @@ export type Dialog =
   | { kind: "delete"; paths: string[]; firstName: string }
   | { kind: "properties"; path: string; props: Properties | null }
   | { kind: "batchRename"; paths: string[] }
+  | { kind: "tags"; paths: string[] }
   | null;
 
 export interface MenuState {

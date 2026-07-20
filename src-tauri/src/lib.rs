@@ -1,11 +1,13 @@
+mod archive;
 mod ops;
+mod rar;
 mod search;
+mod split;
 mod thumbs;
 mod watch;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -250,6 +252,73 @@ fn cancel_op(state: State<'_, OpsState>, op_id: u64) {
     state.cancel(op_id);
 }
 
+// ---------- zip inline (v0.5) ----------
+
+/// O caminho de disco é um arquivo compactado que a gente sabe abrir? A UI usa
+/// isso pra decidir se um duplo-clique ENTRA no arquivo ou manda pro app padrão.
+#[tauri::command(async)]
+fn archive_supported(path: String) -> bool {
+    archive::is_supported(&path)
+}
+
+/// Lista uma "pasta" DENTRO de um arquivo compactado.
+///
+/// Recebe o caminho virtual (`C:\x\a.zip::docs`) e devolve os mesmos `Entry` da
+/// listagem de disco — a lista, a ordenação e a barra de status não sabem que
+/// estão dentro de um zip.
+#[tauri::command(async)]
+fn archive_list(cache: State<'_, archive::ArchiveCache>, path: String) -> Result<Vec<Entry>, String> {
+    let (arc, inner) = archive::split_virtual(&path).ok_or("caminho não é de um arquivo")?;
+    let entries = cache.get(&arc)?;
+    Ok(archive::children_of(&arc, &entries, &inner))
+}
+
+/// Extrai itens de dentro de um arquivo pra uma pasta do disco (em 2º plano;
+/// progresso pelos MESMOS eventos da cópia comum).
+#[tauri::command(async)]
+fn archive_extract(
+    app: AppHandle,
+    state: State<'_, OpsState>,
+    archive_path: String,
+    inners: Vec<String>,
+    dest_dir: String,
+) -> Result<u64, String> {
+    if inners.is_empty() {
+        return Err("nada pra extrair".into());
+    }
+    let (op_id, cancel) = state.register();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        archive::extract(&handle, op_id, cancel, archive_path, inners, dest_dir);
+        handle.state::<OpsState>().finish(op_id);
+    });
+    Ok(op_id)
+}
+
+/// Acrescenta arquivos do disco dentro de um zip existente (só zip — os demais
+/// formatos são só-leitura aqui).
+#[tauri::command(async)]
+fn archive_add(
+    app: AppHandle,
+    state: State<'_, OpsState>,
+    archive_path: String,
+    sources: Vec<String>,
+    inner_dir: String,
+) -> Result<u64, String> {
+    if sources.is_empty() {
+        return Err("nada pra adicionar".into());
+    }
+    let (op_id, cancel) = state.register();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        archive::add_to_zip(&handle, op_id, cancel, archive_path, sources, inner_dir);
+        // Escreveu no arquivo: o índice em cache está velho.
+        handle.state::<archive::ArchiveCache>().invalidate();
+        handle.state::<OpsState>().finish(op_id);
+    });
+    Ok(op_id)
+}
+
 // ---------- busca / watcher / lote (v0.2) ----------
 
 /// Dispara a busca recursiva; resultados via `search-result`/`search-done`.
@@ -436,6 +505,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(OpsState::default())
         .manage(WatchState::default())
+        .manage(archive::ArchiveCache::default())
         .invoke_handler(tauri::generate_handler![
             list_dir,
             list_drives,
@@ -452,6 +522,10 @@ pub fn run() {
             start_search,
             watch_dir,
             batch_rename,
+            archive_supported,
+            archive_list,
+            archive_extract,
+            archive_add,
             thumbs::thumbnail,
             thumbs::read_text_head,
         ])

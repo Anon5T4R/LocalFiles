@@ -1025,3 +1025,175 @@ input:focus {
   background: var(--err-bg);
   border-color: var(--err-border);
 }
+
+/* ================= painel duplo, zip inline e etiquetas (v0.5) ================= */
+
+/* Os dois painéis dividem o espaço meio a meio e cada um rola por conta
+   própria (o `min-width: 0` é o que impede um nome comprido de empurrar o
+   outro painel pra fora da tela). */
+.content-row.dual > .filelist-column {
+  flex: 1 1 0;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+.content-row.dual > .filelist-column:last-of-type {
+  border-right: none;
+}
+
+/* O painel sem foco fica levemente apagado — é o único jeito de saber pra
+   onde vai o próximo atalho de teclado sem ter que adivinhar. */
+.filelist-column.in-pane:not(.focused) .filelist,
+.filelist-column.in-pane:not(.focused) .filelist-msg {
+  opacity: 0.72;
+}
+.filelist-column.in-pane.focused {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Cabeçalho de cada painel: caminho + marca de foco. */
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  min-height: 26px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.pane-header.focused {
+  background: var(--panel);
+}
+.pane-dot {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.pane-header.focused .pane-dot {
+  color: var(--accent);
+}
+.pane-crumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+.pane-crumbs::-webkit-scrollbar {
+  display: none;
+}
+.pane-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Segmento de breadcrumb que aponta pra dentro de um arquivo compactado. */
+.crumb.in-archive {
+  font-style: italic;
+}
+
+/* Abas agrupadas por painel. */
+.tabsbar.dual .tabs-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  opacity: 0.7;
+}
+.tabsbar.dual .tabs-group::-webkit-scrollbar {
+  display: none;
+}
+.tabsbar.dual .tabs-group.active-pane {
+  opacity: 1;
+}
+.tabsbar .tabs-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tabs-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 6px 0;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Barra do filtro de etiqueta (mesma linguagem visual da barra de busca). */
+.tagfilter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* Etiquetas ao lado do nome do arquivo. */
+.tag-dots {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  overflow: hidden;
+  flex-shrink: 1;
+}
+.tag-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.row.selected .tag-chip {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+/* Diálogo de etiquetas. */
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 8px 0;
+}
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tag-row:hover {
+  background: var(--panel-2);
+}
+.tag-row .tag-chip {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* Contador de itens por etiqueta na sidebar. */
+.side-count {
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}

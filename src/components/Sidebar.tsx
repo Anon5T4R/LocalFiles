@@ -28,10 +28,12 @@ export default function Sidebar() {
   const places = useFiles((s) => s.places);
   const drives = useFiles((s) => s.drives);
   const favorites = useFiles((s) => s.favorites);
-  const current = useFiles(
-    (s) => (s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]).path,
-  );
-  const { navigate, startOp, toggleFavorite } = useFiles.getState();
+  const current = useFiles((s) => s.activeTab().path);
+  const tagMap = useFiles((s) => s.tags);
+  const tagFilter = useFiles((s) => s.tagFilter);
+  const { navigate, startOp, toggleFavorite, knownTags, setTagFilter } = useFiles.getState();
+  const tags = knownTags();
+  void tagMap; // assinatura: mudar etiqueta redesenha a lista
 
   /** Soltar itens arrastados num destino da sidebar = mover (Ctrl = copiar). */
   const dropHandlers = (destDir: string) => ({
@@ -85,6 +87,24 @@ export default function Sidebar() {
                 ×
               </button>
             </div>
+          ))}
+        </>
+      )}
+
+      {tags.length > 0 && (
+        <>
+          <div className="side-title">{t("side.tags")}</div>
+          {tags.map(({ tag, count }) => (
+            <button
+              key={tag}
+              className={`side-item ${tagFilter === tag ? "active" : ""}`}
+              title={t("tag.filterTitle", { tag })}
+              onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+            >
+              <span className="side-icon">🏷</span>
+              <span className="side-name">{tag}</span>
+              <span className="side-count">{count}</span>
+            </button>
           ))}
         </>
       )}

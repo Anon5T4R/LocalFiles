@@ -1,18 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as actions from "../lib/actions";
-import { KIND_ICON, formatBytes, formatDate, kindOf, parentOf } from "../lib/fsutil";
+import { innerCrumbs, isVirtual, splitVirtual } from "../lib/apath";
+import { KIND_ICON, breadcrumbOf, formatBytes, formatDate, kindOf, parentOf } from "../lib/fsutil";
 import { localeTag, t } from "../lib/i18n";
 import { getThumb } from "../lib/thumbs";
-import type { Entry, SortBy } from "../lib/types";
+import type { Entry, Pane, SortBy } from "../lib/types";
 import { useVirtual, useWidth } from "../lib/virtual";
 import { useFiles } from "../state/tabs";
 import { useUi } from "../state/ui";
 
 /**
- * A área principal: lista de arquivos nas 3 visões (detalhes/lista/grade),
- * VIRTUALIZADA (pastas gigantes sem engasgo), com seleção (clique/Ctrl/Shift/
- * setas), renomear inline (F2), drag-and-drop, menu de contexto, miniaturas
- * de imagem na grade e modo "resultados de busca" (coluna da pasta).
+ * A área principal de UM painel: lista de arquivos nas 3 visões, VIRTUALIZADA,
+ * com seleção, renomear inline (F2), drag-and-drop, menu de contexto,
+ * miniaturas e modo "resultados de busca".
+ *
+ * Com painel duplo, este componente é montado DUAS vezes (`pane` 0 e 1). Tudo
+ * que ele lê vem do painel dele — nunca do "ativo" — porque senão os dois lados
+ * mostrariam a mesma coisa. O único lugar onde "ativo" importa é o clique:
+ * mexer num painel dá foco a ele antes de qualquer outra coisa.
  */
 
 const ROW_H = 28;
@@ -21,18 +26,32 @@ const CARD_W = 116; // largura mínima do card + gap
 const CARD_H = 104;
 const GRID_PAD = 10;
 
-export default function FileList() {
-  const tab = useFiles((s) => s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]);
-  const search = useFiles((s) => s.search);
+export default function FileList({ pane = 0 }: { pane?: Pane }) {
+  const tab = useFiles((s) => s.paneTab(pane));
+  const search = useFiles((s) => (s.activePane === pane ? s.search : null));
+  const dual = useFiles((s) => s.dual);
+  const activePane = useFiles((s) => s.activePane);
   const view = useFiles((s) => s.view);
   const sortBy = useFiles((s) => s.sortBy);
   const sortDir = useFiles((s) => s.sortDir);
   const renaming = useFiles((s) => s.renaming);
   const clipboard = useFiles((s) => s.clipboard);
-  const { setSelection, setSort, startOp } = useFiles.getState();
+  const tagFilter = useFiles((s) => s.tagFilter);
+  const tags = useFiles((s) => s.tags);
   const setMenu = useUi((s) => s.setMenu);
 
-  const entries = search ? search.results : tab.entries;
+  const focado = !dual || activePane === pane;
+  // As entradas são DERIVADAS aqui, não num seletor do zustand. Um seletor que
+  // devolve um array novo a cada chamada (o filtro de etiqueta devolve) faz o
+  // `useSyncExternalStore` do zustand v5 achar que o estado mudou SEMPRE — o
+  // componente re-renderiza em looping e o React reclama de "getSnapshot".
+  const entries = useMemo(() => {
+    const base = search ? search.results : tab.entries;
+    if (!tagFilter) return base;
+    // Pastas passam sempre: esconder a pasta que CONTÉM os itens etiquetados
+    // deixaria o filtro sem como navegar.
+    return base.filter((e) => e.isDir || (tags[tagKeyOf(e.path)] ?? []).includes(tagFilter));
+  }, [search, tab.entries, tagFilter, tags]);
   const selected = new Set(tab.selection);
   const cutSet = new Set(clipboard?.mode === "cut" ? clipboard.paths : []);
 
@@ -43,6 +62,16 @@ export default function FileList() {
   const rowH = view === "grid" ? CARD_H : ROW_H;
   const headH = view === "details" ? HEAD_H : 0;
   const vr = useVirtual(containerRef, rowCount, rowH, headH);
+
+  /** Qualquer interação com este painel dá foco a ele PRIMEIRO. */
+  const focar = () => {
+    if (useFiles.getState().activePane !== pane) useFiles.getState().setActivePane(pane);
+  };
+
+  const setSelection = (paths: string[], anchor?: number | null, focus?: number | null) => {
+    focar();
+    useFiles.getState().setSelection(paths, anchor, focus);
+  };
 
   const clickEntry = (e: React.MouseEvent, entry: Entry, index: number) => {
     e.stopPropagation();
@@ -62,6 +91,7 @@ export default function FileList() {
   const contextEntry = (e: React.MouseEvent, entry: Entry | null, index?: number) => {
     e.preventDefault();
     e.stopPropagation();
+    focar();
     if (entry && !selected.has(entry.path)) setSelection([entry.path], index ?? null, index ?? null);
     setMenu({ x: e.clientX, y: e.clientY, targetPath: entry?.path ?? null });
   };
@@ -69,6 +99,7 @@ export default function FileList() {
   const dragHandlers = (entry: Entry) => ({
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
+      focar();
       const paths = selected.has(entry.path) ? [...selected] : [entry.path];
       e.dataTransfer.setData("application/x-localfiles", JSON.stringify(paths));
       e.dataTransfer.effectAllowed = "copyMove";
@@ -88,12 +119,11 @@ export default function FileList() {
       e.stopPropagation();
       const paths: string[] = JSON.parse(raw);
       if (paths.includes(entry.path)) return; // soltou em si mesmo
-      void startOp(paths, entry.path, !e.ctrlKey);
+      void useFiles.getState().startOp(paths, entry.path, !e.ctrlKey);
     },
   });
 
-  // Fundo: clique limpa seleção; contexto = menu da pasta; drop de outra aba
-  // solta na pasta atual (mover; Ctrl = copiar).
+  // Fundo: clique limpa seleção; contexto = menu da pasta; drop solta aqui.
   const backgroundProps = {
     onClick: () => setSelection([], null, null),
     onContextMenu: (e: React.MouseEvent) => contextEntry(e, null),
@@ -108,7 +138,7 @@ export default function FileList() {
       const raw = e.dataTransfer.getData("application/x-localfiles");
       if (!raw) return;
       e.preventDefault();
-      void startOp(JSON.parse(raw), tab.path, !e.ctrlKey);
+      void useFiles.getState().startOp(JSON.parse(raw), tab.path, !e.ctrlKey);
     },
   };
 
@@ -133,9 +163,7 @@ export default function FileList() {
     <div className="search-bar">
       <span className="search-info">
         {t("search.results", { q: search.query })} —{" "}
-        {search.running
-          ? t("search.running")
-          : t("search.count", { n: search.results.length })}{" "}
+        {search.running ? t("search.running") : t("search.count", { n: search.results.length })}{" "}
         {search.truncated && t("search.truncated", { max: 2000 })}
       </span>
       <button
@@ -148,18 +176,49 @@ export default function FileList() {
     </div>
   ) : null;
 
-  if (!search && tab.loading)
-    return <div className="filelist-msg">{t("list.loading")}</div>;
+  const filterBar = tagFilter ? (
+    <div className="tagfilter-bar">
+      <span>🏷 {t("tag.filtering", { tag: tagFilter })}</span>
+      <button
+        className="search-close"
+        title={t("tag.clearFilter")}
+        onClick={() => useFiles.getState().setTagFilter(null)}
+      >
+        ✕
+      </button>
+    </div>
+  ) : null;
+
+  /** Cabeçalho do painel: só existe no modo duplo, e é onde se vê ONDE cada
+   *  lado está. Sem ele, o painel sem foco não teria caminho visível nenhum. */
+  const paneHeader = dual ? <PaneHeader pane={pane} path={tab.path} focado={focado} /> : null;
+
+  const wrap = (body: React.ReactNode) => (
+    <div
+      className={`filelist-column ${dual ? "in-pane" : ""} ${focado ? "focused" : ""}`}
+      onMouseDown={focar}
+    >
+      {paneHeader}
+      {searchBar}
+      {filterBar}
+      {body}
+    </div>
+  );
+
+  if (!search && tab.loading) return wrap(<div className="filelist-msg">{t("list.loading")}</div>);
   if (!search && tab.error)
-    return <div className="filelist-msg error">{t("list.denied", { error: tab.error })}</div>;
+    return wrap(<div className="filelist-msg error">{t("list.denied", { error: tab.error })}</div>);
   if (entries.length === 0)
-    return (
-      <div className="filelist-column">
-        {searchBar}
-        <div className="filelist-msg empty" {...backgroundProps}>
-          {search ? (search.running ? t("search.running") : t("search.none")) : t("list.empty")}
-        </div>
-      </div>
+    return wrap(
+      <div className="filelist-msg empty" {...backgroundProps}>
+        {search
+          ? search.running
+            ? t("search.running")
+            : t("search.none")
+          : tagFilter
+            ? t("tag.noneHere")
+            : t("list.empty")}
+      </div>,
     );
 
   const rowClass = (entry: Entry) =>
@@ -176,7 +235,10 @@ export default function FileList() {
     renaming === entry.path ? (
       <RenameInput entry={entry} />
     ) : (
-      <span className="entry-name">{entry.name}</span>
+      <>
+        <span className="entry-name">{entry.name}</span>
+        <TagDots tags={tags[tagKeyOf(entry.path)] ?? []} />
+      </>
     );
 
   let body: React.ReactNode;
@@ -242,7 +304,7 @@ export default function FileList() {
     );
   } else {
     const header = (key: SortBy, label: string) => (
-      <button className="col-header" onClick={() => setSort(key)}>
+      <button className="col-header" onClick={() => useFiles.getState().setSort(key)}>
         {label}
         {sortBy === key && <span className="sort-arrow">{sortDir === "asc" ? "▲" : "▼"}</span>}
       </button>
@@ -299,10 +361,78 @@ export default function FileList() {
     );
   }
 
+  return wrap(body);
+}
+
+/** Chave de etiqueta (espelho do `tagKey` — repetido aqui só pra leitura). */
+function tagKeyOf(path: string): string {
+  const p = path.replace(/[\\/]+$/, "");
+  return /^[a-zA-Z]:[\\/]|^\\\\/.test(p) ? p.toLowerCase() : p;
+}
+
+/** Etiquetas do item, discretas ao lado do nome. */
+function TagDots({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
   return (
-    <div className="filelist-column">
-      {searchBar}
-      {body}
+    <span className="tag-dots" title={tags.join(", ")}>
+      {tags.map((tg) => (
+        <span key={tg} className="tag-chip">
+          {tg}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Cabeçalho de um painel no modo duplo: caminho clicável (inclusive o pedaço
+ * de DENTRO de um arquivo compactado) e a marca de quem está com o foco.
+ */
+function PaneHeader({ pane, path, focado }: { pane: Pane; path: string; focado: boolean }) {
+  const v = splitVirtual(path);
+  const navigate = (p: string) => void useFiles.getState().navigate(p, { pane });
+  const diskPath = v ? v.archive : path;
+  const crumbs = breadcrumbOf(diskPath);
+  // Dentro de um arquivo, o último pedaço do disco é o ARQUIVO: dali pra frente
+  // os segmentos são internos, e a raiz do arquivo é um destino navegável.
+  const dentro = v ? innerCrumbs(path) : [];
+
+  return (
+    <div className={`pane-header ${focado ? "focused" : ""}`}>
+      <span className="pane-dot" title={focado ? t("pane.focused") : t("pane.unfocused")}>
+        {focado ? "●" : "○"}
+      </span>
+      <div className="pane-crumbs">
+        {crumbs.map((c, i) => (
+          <span key={c.path} className="crumb-wrap">
+            {i > 0 && <span className="crumb-sep">›</span>}
+            <button className="crumb" title={c.path} onClick={() => navigate(c.path)}>
+              {c.name}
+            </button>
+          </span>
+        ))}
+        {v && (
+          <span className="crumb-wrap">
+            <span className="crumb-sep">›</span>
+            <button
+              className="crumb in-archive"
+              title={t("arch.root")}
+              onClick={() => navigate(`${v.archive}::`)}
+            >
+              🗜
+            </button>
+          </span>
+        )}
+        {dentro.map((c) => (
+          <span key={c.path} className="crumb-wrap">
+            <span className="crumb-sep">›</span>
+            <button className="crumb in-archive" onClick={() => navigate(c.path)}>
+              {c.name}
+            </button>
+          </span>
+        ))}
+      </div>
+      {isVirtual(path) && <span className="pane-badge">{t("arch.badge")}</span>}
     </div>
   );
 }
@@ -310,7 +440,9 @@ export default function FileList() {
 /** Ícone ou miniatura (imagens ganham thumbnail real na grade). */
 export function EntryVisual({ entry, size }: { entry: Entry; size: number }) {
   const [thumb, setThumb] = useState<string | null>(null);
-  const isImage = kindOf(entry) === "image";
+  // Dentro de um arquivo compactado não há caminho de disco pra miniatura:
+  // gerar exigiria extrair pro temporário a cada rolagem.
+  const isImage = kindOf(entry) === "image" && !isVirtual(entry.path);
 
   useEffect(() => {
     let alive = true;

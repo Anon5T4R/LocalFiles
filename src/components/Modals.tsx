@@ -32,6 +32,7 @@ export default function Modals() {
         )}
         {dialog.kind === "properties" && <PropertiesDialog />}
         {dialog.kind === "batchRename" && <BatchRenameModal paths={dialog.paths} />}
+        {dialog.kind === "tags" && <TagsDialog paths={dialog.paths} />}
       </div>
     </div>
   );
@@ -39,7 +40,7 @@ export default function Modals() {
 
 function NewEntryDialog({ file }: { file: boolean }) {
   const setDialog = useUi((s) => s.setDialog);
-  const entries = useFiles((s) => (s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]).entries);
+  const entries = useFiles((s) => s.activeTab().entries);
   const existing = new Set(entries.map((e) => e.name.toLowerCase()));
   const defaultName = file ? t("dlg.defaultFileName") : t("dlg.defaultFolderName");
   const [name, setName] = useState(() => uniqueName(defaultName, existing));
@@ -158,6 +159,98 @@ function PropertiesDialog() {
           {t("dlg.confirm")}
         </button>
       </div>
+    </>
+  );
+}
+
+/**
+ * Etiquetas da seleção.
+ *
+ * Com VÁRIOS itens selecionados uma etiqueta pode estar em alguns e não em
+ * outros — o estado do meio existe e é mostrado (indeterminado), em vez de
+ * fingir que é "não" e apagar a etiqueta de quem já a tinha no primeiro clique.
+ */
+function TagsDialog({ paths }: { paths: string[] }) {
+  const setDialog = useUi((s) => s.setDialog);
+  const tags = useFiles((s) => s.tags);
+  const { applyTag, knownTags, tagsFor } = useFiles.getState();
+  const [novo, setNovo] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  const porItem = paths.map((p) => tagsFor(p));
+  const conhecidas = knownTags().map((x) => x.tag);
+  // Etiquetas que aparecem em pelo menos um dos selecionados + todas as já usadas.
+  const universo = [...new Set([...conhecidas, ...porItem.flat()])];
+
+  const estado = (tag: string): "todos" | "alguns" | "nenhum" => {
+    const n = porItem.filter((list) => list.includes(tag)).length;
+    return n === 0 ? "nenhum" : n === paths.length ? "todos" : "alguns";
+  };
+
+  const criar = () => {
+    const t2 = novo.trim();
+    if (!t2) return;
+    applyTag(paths, t2, true);
+    setNovo("");
+  };
+
+  return (
+    <>
+      <h2>{t("tag.title")}</h2>
+      <p className="muted">
+        {paths.length === 1 ? t("tag.forOne") : t("tag.forMany", { n: paths.length })}
+      </p>
+
+      <div className="tag-list">
+        {universo.length === 0 && <p className="muted">{t("tag.none")}</p>}
+        {universo.map((tg) => {
+          const st = estado(tg);
+          return (
+            <label key={tg} className={`tag-row ${st}`}>
+              <input
+                type="checkbox"
+                checked={st === "todos"}
+                ref={(el) => {
+                  if (el) el.indeterminate = st === "alguns";
+                }}
+                onChange={() => applyTag(paths, tg, st !== "todos")}
+              />
+              <span className="tag-chip">{tg}</span>
+              {st === "alguns" && <span className="muted">{t("tag.partial")}</span>}
+            </label>
+          );
+        })}
+      </div>
+
+      <label className="field">
+        <span>{t("tag.new")}</span>
+        <input
+          ref={ref}
+          value={novo}
+          maxLength={24}
+          spellCheck={false}
+          onChange={(e) => setNovo(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") criar();
+          }}
+        />
+      </label>
+
+      <div className="modal-actions">
+        <button disabled={!novo.trim()} onClick={criar}>
+          {t("tag.add")}
+        </button>
+        <button className="primary" onClick={() => setDialog(null)}>
+          {t("dlg.confirm")}
+        </button>
+      </div>
+      {/* `tags` na dependência do render: mudar etiqueta redesenha a lista. */}
+      <span hidden>{Object.keys(tags).length}</span>
     </>
   );
 }

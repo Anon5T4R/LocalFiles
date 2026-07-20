@@ -1,0 +1,43 @@
+# Windows: `comctl32.dll` carregado sob demanda (delay load).
+#
+# # Por que isso existe (medido, não suposto)
+#
+# O executável de teste do `cargo test` **não recebe manifesto de aplicação** —
+# só o binário final do app recebe (o `tauri-build` embute o dele). Sem
+# manifesto, o Windows resolve `comctl32.dll` pro `System32\comctl32.dll`, que é
+# a **versão 5.82**; a v6 (a que tem os controles modernos) só vem pelo
+# assembly side-by-side declarado no manifesto.
+#
+# Conferido com `dumpbin /EXPORTS C:\Windows\System32\comctl32.dll` nesta
+# máquina: dos 4 símbolos que o binário importa, três existem na 5.82
+# (`SetWindowSubclass`, `DefSubclassProc`, `RemoveWindowSubclass`) e
+# **`TaskDialogIndirect` NÃO existe**. Como a importação é resolvida na CARGA,
+# o processo morre antes do `main` com `STATUS_ENTRYPOINT_NOT_FOUND`
+# (0xC0000139) — e a mensagem do cargo é só "process didn't exit successfully",
+# que não aponta pra lugar nenhum.
+#
+# O sintoma só apareceu na v0.5.0 porque até então os testes tocavam um pedaço
+# pequeno do crate; com os testes de zip inline e de cópia/movimentação, o
+# linker passou a reter o gráfico da janela (tao/wry) e, com ele, a importação.
+# Confirmado comparando o `dumpbin /IMPORTS` do exe de teste antes e depois:
+# antes não havia `comctl32.dll` nenhum.
+#
+# # Por que delay load, e não manifesto
+#
+# Embutir manifesto em todo binário brigaria com o que o `tauri-build` já põe no
+# app (manifesto duplicado = erro de link). Com `/DELAYLOAD`, a importação sai
+# da tabela resolvida na carga e vira uma resolução na PRIMEIRA CHAMADA:
+#
+# * no teste, `TaskDialogIndirect` nunca é chamado — ninguém abre caixa de
+#   diálogo num teste — então o processo carrega e os testes rodam;
+# * no app de verdade, a primeira chamada acontece com o contexto de ativação
+#   do manifesto já valendo, então resolve pra comctl32 **v6**, exatamente como
+#   antes. O comportamento do app não muda.
+#
+# `delayimp.lib` é o auxiliar da MSVC que implementa o carregamento tardio; sem
+# ele o `/DELAYLOAD` não linka.
+[target.'cfg(windows)']
+rustflags = [
+    "-C", "link-arg=/DELAYLOAD:comctl32.dll",
+    "-C", "link-arg=delayimp.lib",
+]

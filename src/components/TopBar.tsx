@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as actions from "../lib/actions";
+import { innerCrumbs, splitVirtual } from "../lib/apath";
 import { breadcrumbOf } from "../lib/fsutil";
 import { t } from "../lib/i18n";
 import { useFiles } from "../state/tabs";
@@ -10,11 +11,12 @@ import { useUi } from "../state/ui";
  * drop), busca (Ctrl+F), nova pasta, ocultos, preview, favorito, visão, config.
  */
 export default function TopBar() {
-  const tab = useFiles((s) => s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]);
+  const tab = useFiles((s) => s.activeTab());
   const view = useFiles((s) => s.view);
   const search = useFiles((s) => s.search);
+  const dual = useFiles((s) => s.dual);
   const isFav = useFiles((s) => s.favorites.some((f) => f.path === tab.path));
-  const { navigate, goBack, goForward, goUp, refresh, setView, startOp, toggleFavorite } =
+  const { navigate, goBack, goForward, goUp, refresh, setView, startOp, toggleFavorite, toggleDual } =
     useFiles.getState();
   const showHidden = useUi((s) => s.showHidden);
   const previewOpen = useUi((s) => s.previewOpen);
@@ -94,7 +96,11 @@ export default function TopBar() {
     },
   });
 
-  const crumbs = breadcrumbOf(tab.path);
+  // Dentro de um arquivo compactado o caminho tem duas metades: a do disco
+  // (até o arquivo) e a de dentro. As duas viram breadcrumb navegável.
+  const v = splitVirtual(tab.path);
+  const crumbs = breadcrumbOf(v ? v.archive : tab.path);
+  const dentro = v ? innerCrumbs(tab.path) : [];
 
   return (
     <div className="topbar">
@@ -150,6 +156,26 @@ export default function TopBar() {
               </button>
             </span>
           ))}
+          {v && (
+            <span className="crumb-wrap">
+              <span className="crumb-sep">›</span>
+              <button
+                className="crumb in-archive"
+                title={t("arch.root")}
+                onClick={() => void navigate(`${v.archive}::`)}
+              >
+                🗜
+              </button>
+            </span>
+          )}
+          {dentro.map((c) => (
+            <span key={c.path} className="crumb-wrap">
+              <span className="crumb-sep">›</span>
+              <button className="crumb in-archive" onClick={() => void navigate(c.path)}>
+                {c.name}
+              </button>
+            </span>
+          ))}
           <span className="crumb-fill" onClick={() => setEditing(true)} />
         </div>
       )}
@@ -181,11 +207,37 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-actions">
+        <button
+          className={dual ? "active" : ""}
+          title={t("pane.toggleTitle")}
+          onClick={toggleDual}
+        >
+          ⊞
+        </button>
+        {dual && (
+          <>
+            <button
+              title={t("pane.copyTitle")}
+              onClick={() => actions.transferToOtherPane(false)}
+            >
+              ⇥
+            </button>
+            <button
+              title={t("pane.moveTitle")}
+              onClick={() => actions.transferToOtherPane(true)}
+            >
+              ⇛
+            </button>
+          </>
+        )}
         <button title={t("topbar.newFolder")} onClick={() => actions.askNewFolder()}>
           📁+
         </button>
         <button title={t("topbar.newFile")} onClick={() => actions.askNewFile()}>
           📄+
+        </button>
+        <button title={t("tag.title")} onClick={() => actions.askTags()}>
+          🏷
         </button>
         <button
           className={isFav ? "active" : ""}

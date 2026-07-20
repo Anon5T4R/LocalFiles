@@ -40,6 +40,9 @@ export interface OpDone {
   canceled: boolean;
   error: string | null;
   created: string[];
+  /** Links simbólicos que não foram copiados — quando > 0 num "mover", a
+   *  origem foi PRESERVADA de propósito e a UI precisa dizer isso. */
+  skippedSymlinks: number;
 }
 
 export interface Properties {
@@ -58,8 +61,13 @@ export type ViewMode = "details" | "list" | "grid";
 export type SortBy = "name" | "size" | "modified" | "type";
 export type SortDir = "asc" | "desc";
 
+/** Qual dos dois painéis (0 = esquerdo/único, 1 = direito). */
+export type Pane = 0 | 1;
+
 export interface Tab {
   id: number;
+  /** Painel a que a aba pertence — uma aba não migra de painel. */
+  pane: Pane;
   path: string;
   history: string[];
   histIndex: number;
@@ -78,9 +86,13 @@ export interface ClipboardState {
   paths: string[];
 }
 
+/** O que a operação está fazendo (muda só o texto que a UI mostra). */
+export type OpKind = "transfer" | "extract" | "add";
+
 export interface RunningOp {
   opId: number;
   isMove: boolean;
+  kind: OpKind;
   progress: OpProgress | null;
 }
 

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import * as actions from "./lib/actions";
+import { isVirtual } from "./lib/apath";
 import { getStartupDir, isTauri, watchDir } from "./lib/backend";
 import { t } from "./lib/i18n";
 import type { OpDone, OpProgress, SearchBatch, SearchDone } from "./lib/types";
@@ -24,6 +25,8 @@ let typeBuffer = "";
 let typeTimer: number | undefined;
 
 export default function App() {
+  const dual = useFiles((s) => s.dual);
+
   // Boot: sidebar + pasta inicial (argumento do launch > home > C:\).
   useEffect(() => {
     const files = useFiles.getState();
@@ -31,7 +34,12 @@ export default function App() {
     void files.loadSidebar().then(async () => {
       const startup = await getStartupDir().catch(() => null);
       const home = useFiles.getState().places.find((p) => p.id === "home")?.path;
-      await files.navigate(startup ?? home ?? FALLBACK_DIR, { pushHistory: false });
+      const inicial = startup ?? home ?? FALLBACK_DIR;
+      await files.navigate(inicial, { pushHistory: false });
+      // O painel 1 nasce no mesmo lugar (e é carregado mesmo escondido, pra
+      // ligar o painel duplo não mostrar uma lista vazia por um instante).
+      await files.navigate(inicial, { pushHistory: false, pane: 1 });
+      files.setActivePane(0);
     });
   }, []);
 
@@ -49,8 +57,28 @@ export default function App() {
       if (e.payload.canceled) ui.pushToast("info", t("ops.canceled"));
       else if (!e.payload.ok && e.payload.error)
         ui.pushToast("error", t("toast.opFailed", { error: e.payload.error }));
-      else if (e.payload.ok) ui.pushToast("ok", t(op?.isMove ? "ops.moveDone" : "ops.copyDone"));
-      void files.refresh();
+      else if (e.payload.ok) {
+        ui.pushToast(
+          "ok",
+          t(
+            op?.kind === "extract"
+              ? "ops.extractDone"
+              : op?.kind === "add"
+                ? "ops.addDone"
+                : op?.isMove
+                  ? "ops.moveDone"
+                  : "ops.copyDone",
+          ),
+        );
+        // Mover com link pulado: a origem foi PRESERVADA de propósito e o
+        // usuário precisa saber, senão acha que moveu tudo (ver ops.rs).
+        if (op?.isMove && e.payload.skippedSymlinks > 0) {
+          ui.pushToast("info", t("ops.symlinksKept", { n: e.payload.skippedSymlinks }));
+        }
+      }
+      // Os DOIS painéis podem ter mudado (a operação vai de um pro outro).
+      void files.refresh({ pane: 0, silent: true });
+      void files.refresh({ pane: 1, silent: true });
     });
     const un3 = listen<string>("open-dir", (e) => {
       useFiles.getState().newTab(e.payload);
@@ -72,8 +100,10 @@ export default function App() {
     // Watcher: a pasta ativa mudou por fora → refresh silencioso.
     const un7 = listen<string>("dir-changed", (e) => {
       const files = useFiles.getState();
-      if (e.payload === files.activeTab().path && !files.search) {
-        void files.refresh({ silent: true });
+      for (const pane of [0, 1] as const) {
+        if (e.payload === files.paneTab(pane).path && !files.search) {
+          void files.refresh({ silent: true, pane });
+        }
       }
     });
     return () => {
@@ -91,12 +121,33 @@ export default function App() {
       const entries = files.visibleEntries();
       const key = e.key.toLowerCase();
 
+      // Tab alterna o foco entre os painéis (a convenção dos gerenciadores de
+      // dois painéis). Só quando o modo duplo está ligado — senão o Tab tem
+      // que continuar navegando pelos controles, que é o comportamento que
+      // quem usa teclado ou leitor de tela espera de uma janela normal.
+      if (e.key === "Tab" && !e.ctrlKey && !e.altKey && files.dual) {
+        e.preventDefault();
+        files.swapPane();
+        return;
+      }
       if (e.ctrlKey && key === "t") { e.preventDefault(); files.newTab(); return; }
-      if (e.ctrlKey && key === "w") { e.preventDefault(); files.closeTab(files.activeTabId); return; }
+      if (e.ctrlKey && key === "w") { e.preventDefault(); files.closeTab(files.activeTab().id); return; }
       if (e.ctrlKey && key === "a") { e.preventDefault(); actions.selectAll(); return; }
+      if (e.ctrlKey && e.shiftKey && key === "d") { e.preventDefault(); files.toggleDual(); return; }
+      if (e.ctrlKey && e.shiftKey && key === "c") {
+        e.preventDefault();
+        actions.transferToOtherPane(false);
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && key === "m") {
+        e.preventDefault();
+        actions.transferToOtherPane(true);
+        return;
+      }
       if (e.ctrlKey && key === "c") { e.preventDefault(); actions.copySelection(false); return; }
       if (e.ctrlKey && key === "x") { e.preventDefault(); actions.copySelection(true); return; }
       if (e.ctrlKey && key === "v") { e.preventDefault(); actions.paste(); return; }
+      if (e.ctrlKey && key === "g") { e.preventDefault(); actions.askTags(); return; }
       if (e.ctrlKey && key === "d") { e.preventDefault(); files.toggleFavorite(tab.path); return; }
       if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); files.goBack(); return; }
       if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); files.goForward(); return; }
@@ -110,7 +161,11 @@ export default function App() {
       if (e.key === "F2") { e.preventDefault(); actions.startRename(); return; }
       if (e.key === "Delete") { e.preventDefault(); actions.askDelete(); return; }
       if (e.key === "Backspace") { e.preventDefault(); files.goUp(); return; }
-      if (e.key === "Escape") { files.setSelection([], null, null); return; }
+      if (e.key === "Escape") {
+        if (files.tagFilter) files.setTagFilter(null);
+        else files.setSelection([], null, null);
+        return;
+      }
       if (e.key === "Enter" && tab.selection.length === 1) {
         const entry = entries.find((x) => x.path === tab.selection[0]);
         if (entry) { e.preventDefault(); actions.openEntry(entry); }
@@ -159,7 +214,9 @@ export default function App() {
     if (!isTauri) return;
     const onFocus = () => {
       const files = useFiles.getState();
-      void watchDir(files.activeTab().path).catch(() => {});
+      const p = files.activeTab().path;
+      // Dentro de um arquivo compactado não há pasta pra observar.
+      if (!isVirtual(p)) void watchDir(p).catch(() => {});
       void files.refresh({ silent: true });
     };
     window.addEventListener("focus", onFocus);
@@ -173,8 +230,9 @@ export default function App() {
       <div className="main">
         <Sidebar />
         <div className="content">
-          <div className="content-row">
-            <FileList />
+          <div className={`content-row ${dual ? "dual" : ""}`}>
+            <FileList pane={0} />
+            {dual && <FileList pane={1} />}
             <PreviewPanel />
           </div>
           <StatusBar />

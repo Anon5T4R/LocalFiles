@@ -3,6 +3,15 @@ import { formatBytes } from "../lib/fsutil";
 import { t } from "../lib/i18n";
 import { useFiles } from "../state/tabs";
 
+import type { OpKind } from "../lib/types";
+
+/** Texto da operação: extrair e adicionar não são "copiar" nem "mover". */
+function opLabel(kind: OpKind, isMove: boolean) {
+  if (kind === "extract") return "ops.extracting" as const;
+  if (kind === "add") return "ops.adding" as const;
+  return isMove ? ("ops.moving" as const) : ("ops.copying" as const);
+}
+
 /** Painel flutuante das transferências em andamento (progresso + cancelar). */
 export default function OpsPanel() {
   const ops = useFiles((s) => s.ops);
@@ -20,7 +29,7 @@ export default function OpsPanel() {
           <div key={op.opId} className="op">
             <div className="op-line">
               <span className="op-text">
-                {t(op.isMove ? "ops.moving" : "ops.copying", {
+                {t(opLabel(op.kind, op.isMove), {
                   done: p ? formatBytes(p.doneBytes) : "…",
                   total: p ? formatBytes(p.totalBytes) : "…",
                 })}

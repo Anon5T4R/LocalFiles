@@ -23,7 +23,7 @@ export default function FolderTree({ path, icon, label, depth }: Props) {
   const [children, setChildren] = useState<Entry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const current = useFiles(
-    (s) => (s.tabs.find((tb) => tb.id === s.activeTabId) ?? s.tabs[0]).path,
+    (s) => s.activeTab().path,
   );
   const navigate = useFiles((s) => s.navigate);
 
