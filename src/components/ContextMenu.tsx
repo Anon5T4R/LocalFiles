@@ -91,6 +91,10 @@ export default function ContextMenu() {
             actions.openEntry(target),
           )}
           {target.isDir && item(t("menu.openNewTab"), () => files.newTab(target.path))}
+          {/* Só pasta REAL: dentro de um compactado não há caminho de disco
+              pra o shell abrir. */}
+          {target.isDir && !isVirtual(target.path) &&
+            item(t("menu.openTerminal"), () => actions.openTerminalHere(target.path))}
           {alvoEhArquivo &&
             item(t("menu.openArchiveApp"), () => actions.openArchiveExternally(target.path))}
           {!target.isDir && !isVirtual(target.path) && !alvoEhArquivo &&
@@ -133,6 +137,11 @@ export default function ContextMenu() {
           {item(t("menu.selectAll"), () => actions.selectAll())}
           {item(t("menu.refresh"), () => void files.refresh())}
           <div className="menu-sep" />
+          {/* Fundo da pasta: "aqui" é a pasta do painel COM FOCO — o
+              `activeTab()` já resolve isso (o clique direito dá foco ao painel
+              antes de abrir o menu), então o painel duplo funciona de graça. */}
+          {!dentroDeArquivo &&
+            item(t("menu.openTerminal"), () => actions.openTerminalHere(tab.path))}
           {!dentroDeArquivo && item(t("menu.properties"), () => actions.showProperties(tab.path))}
           {dentroDeArquivo && vDest &&
             item(t("menu.openArchiveApp"), () => actions.openArchiveExternally(vDest.archive))}

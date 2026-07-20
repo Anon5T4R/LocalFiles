@@ -2,6 +2,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import * as backend from "./backend";
 import { isSupportedArchive, isVirtual, joinVirtual, splitVirtual } from "./apath";
 import { t } from "./i18n";
+import { terminalErrorKind, terminalTarget } from "./terminal";
 import type { Entry } from "./types";
 import { useFiles } from "../state/tabs";
 import { useUi } from "../state/ui";
@@ -54,6 +55,31 @@ export function extractSelection() {
     return;
   }
   void files.transferToOtherPane(false);
+}
+
+/**
+ * "Abrir aqui": entrega a pasta em foco pro LocalTerminal.
+ *
+ * Dentro de um arquivo compactado não existe pasta de disco pra entregar — o
+ * item nem aparece no menu, mas a guarda fica aqui também porque atalho e
+ * toolbar chamam a mesma função (regra do arquivo: o comportamento é um só).
+ */
+export function openTerminalHere(dir: string) {
+  const ui = useUi.getState();
+  const target = terminalTarget(dir);
+  if (!target.ok) {
+    if (target.reason === "inArchive") ui.pushToast("info", t("term.notInArchive"));
+    return;
+  }
+  backend.openInTerminal(target.dir).catch((e) => {
+    // Não instalado é um resultado ESPERADO, não uma falha: a mensagem diz o
+    // que fazer em vez de mostrar o erro cru do spawn.
+    if (terminalErrorKind(e) === "notInstalled") {
+      ui.pushToast("info", t("term.notInstalled"));
+    } else {
+      ui.pushToast("error", t("term.openFailed", { error: String(e) }));
+    }
+  });
 }
 
 export function openWith(path: string) {

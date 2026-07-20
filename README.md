@@ -5,6 +5,13 @@ navegar, organizar, copiar e mover arquivos sem depender do Explorer.
 
 ## Recursos
 
+**v0.6**
+- **"Abrir no terminal"** no menu de contexto — na pasta em foco (fundo da
+  lista) ou numa pasta selecionada. Abre o **LocalTerminal** já dentro dela;
+  com o terminal aberto, vira uma aba nova em vez de outra janela. Dentro de um
+  arquivo compactado o item não aparece: ali não existe caminho de disco.
+  Sem o LocalTerminal instalado, o app **diz isso** em vez de falhar calado.
+
 **v0.2**
 - **Busca** na pasta atual (Ctrl+F): por nome e, opcionalmente, **dentro do
   conteúdo** dos arquivos de texto — resultados em streaming, cancelável

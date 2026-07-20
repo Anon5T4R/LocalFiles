@@ -2,6 +2,7 @@ mod archive;
 mod ops;
 mod rar;
 mod search;
+mod siblings;
 mod split;
 mod thumbs;
 mod watch;
@@ -528,6 +529,8 @@ pub fn run() {
             archive_add,
             thumbs::thumbnail,
             thumbs::read_text_head,
+            siblings::open_in_terminal,
+            siblings::terminal_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -55,6 +55,19 @@ export function getStartupDir(): Promise<string | null> {
   return invoke("get_startup_dir");
 }
 
+/**
+ * Abre o LocalTerminal na pasta pedida ("abrir aqui").
+ * Rejeita com `TERMINAL_NOT_INSTALLED` quando o app não está instalado.
+ */
+export function openInTerminal(dir: string): Promise<void> {
+  return invoke("open_in_terminal", { dir });
+}
+
+/** O LocalTerminal está instalado nesta máquina? */
+export function terminalAvailable(): Promise<boolean> {
+  return invoke("terminal_available");
+}
+
 // ---------- v0.2 ----------
 
 /** Ids de busca gerados NO FRONT (faixa >= 2^32, sem colidir com os ids que o

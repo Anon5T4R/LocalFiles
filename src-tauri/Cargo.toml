@@ -1,6 +1,6 @@
 [package]
 name = "localfiles"
-version = "0.5.1"
+version = "0.6.0"
 description = "LocalFiles — gerenciador de arquivos 100% offline da suíte Local"
 authors = ["Taylor"]
 edition = "2021"
@@ -48,3 +48,9 @@ rars = "0.4"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(windows)'.dependencies]
+# "Abrir no terminal": acha o exe do LocalTerminal na chave Uninstall, que é a
+# mesma fonte que o TaylorHub usa. O NSIS do Tauri não põe o app no PATH, então
+# procurar por nome só funcionaria na máquina do desenvolvedor.
+winreg = "0.55"
