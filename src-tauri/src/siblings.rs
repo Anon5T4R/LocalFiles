@@ -201,15 +201,29 @@ mod tests {
         move |p: &Path| owned.iter().any(|x| x == p)
     }
 
+    /// Caminho de teste montado com o separador DA PLATAFORMA.
+    ///
+    /// Os literais `r"C:\..."` da primeira versão destes testes passavam no
+    /// Windows e quebravam no job Ubuntu do CI: no Linux `C:\a\b.exe` é UM
+    /// componente só, então `join`/`parent` não fazem o que a asserção espera.
+    /// A LÓGICA aqui (tirar aspas, cortar no `,`, juntar, subir um nível) é
+    /// neutra de plataforma e merece rodar nas duas — o que era específico do
+    /// Windows era só a forma de escrever o caminho. (Mesma família da lição
+    /// "`#[cfg(windows)]` só o CI Linux pega".)
+    fn p(parts: &[&str]) -> String {
+        let mut b = PathBuf::new();
+        for x in parts {
+            b.push(x);
+        }
+        b.to_string_lossy().into_owned()
+    }
+
     #[test]
     fn install_location_e_o_caminho_normal() {
-        let e = exe_from_registry_values(
-            Some(r"C:\Program Files\LocalTerminal"),
-            None,
-            "LocalTerminal.exe",
-            only(&[r"C:\Program Files\LocalTerminal\LocalTerminal.exe"]),
-        );
-        assert_eq!(e.as_deref(), Some(r"C:\Program Files\LocalTerminal\LocalTerminal.exe"));
+        let loc = p(&["base", "LocalTerminal"]);
+        let full = p(&["base", "LocalTerminal", "LocalTerminal.exe"]);
+        let e = exe_from_registry_values(Some(&loc), None, "LocalTerminal.exe", only(&[&full]));
+        assert_eq!(e.as_deref(), Some(full.as_str()));
     }
 
     #[test]
@@ -241,13 +255,15 @@ mod tests {
         // O caso que morde de verdade: o usuário moveu/reinstalou e a chave
         // `InstallLocation` aponta pra uma pasta que não existe mais. Aceitar
         // o valor sem conferir daria "programa não encontrado" no spawn.
+        let antigo = p(&["antigo", "LocalTerminal"]);
+        let novo = p(&["novo", "LocalTerminal.exe"]);
         let e = exe_from_registry_values(
-            Some(r"C:\Antigo\LocalTerminal"),
-            Some(r"C:\Novo\LocalTerminal.exe,0"),
+            Some(&antigo),
+            Some(&format!("{novo},0")),
             "LocalTerminal.exe",
-            only(&[r"C:\Novo\LocalTerminal.exe"]),
+            only(&[&novo]),
         );
-        assert_eq!(e.as_deref(), Some(r"C:\Novo\LocalTerminal.exe"));
+        assert_eq!(e.as_deref(), Some(novo.as_str()));
     }
 
     #[test]
@@ -265,6 +281,10 @@ mod tests {
         assert_eq!(exe_from_registry_values(None, Some(",0"), "a.exe", |_| true), None);
     }
 
+    // Só no Windows: aqui os literais COM barra invertida são o próprio objeto
+    // do teste (é o texto que o registro do Windows guarda), então não dá pra
+    // neutralizá-los sem perder o sentido.
+    #[cfg(windows)]
     #[test]
     fn valores_reais_do_instalador_nsis_da_suite() {
         // Valores COPIADOS do registro desta máquina (2026-07-20). Duas coisas
@@ -311,17 +331,16 @@ mod tests {
 
     #[test]
     fn vizinho_do_nosso_exe() {
+        let ours = p(&["apps", "LocalFiles.exe"]);
+        let neighbour = p(&["apps", "LocalTerminal.exe"]);
         let e = exe_beside_ours(
-            Some(Path::new(r"C:\Apps\LocalFiles.exe")),
+            Some(Path::new(&ours)),
             "LocalTerminal.exe",
-            only(&[r"C:\Apps\LocalTerminal.exe"]),
+            only(&[&neighbour]),
         );
-        assert_eq!(e.as_deref(), Some(r"C:\Apps\LocalTerminal.exe"));
+        assert_eq!(e.as_deref(), Some(neighbour.as_str()));
         // Sem vizinho: None, não um caminho que não existe.
-        assert_eq!(
-            exe_beside_ours(Some(Path::new(r"C:\Apps\LocalFiles.exe")), "X.exe", |_| false),
-            None
-        );
+        assert_eq!(exe_beside_ours(Some(Path::new(&ours)), "X.exe", |_| false), None);
         assert_eq!(exe_beside_ours(None, "X.exe", |_| true), None);
     }
 
