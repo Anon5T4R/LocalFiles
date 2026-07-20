@@ -34,6 +34,29 @@ pub const TERMINAL_EXE: &str = "LocalTerminal.exe";
 #[cfg(not(windows))]
 pub const TERMINAL_EXE: &str = "localterminal";
 
+/// Apara o valor CRU de `DisplayIcon`.
+///
+/// Duas formas convivem no registro desta máquina:
+/// - NSIS do Tauri (a suíte): `"C:\...\localterminal.exe"` — entre aspas e
+///   **sem** o sufixo `,0`;
+/// - electron-builder (LocalMind): `C:\...\LocalMind.exe,0` — sem aspas e com
+///   o índice do ícone.
+///
+/// Por isso o corte na vírgula só vale quando o caminho **não** está entre
+/// aspas: dentro das aspas a vírgula é parte do caminho (pasta com vírgula no
+/// nome é legal no Windows), e quem termina o caminho é o fecha-aspas. Cortar
+/// antes de aparar as aspas — como esta função fazia até a v0.6.2 — decepa o
+/// caminho na primeira vírgula e a detecção falha calada.
+///
+/// Mesma regra do `clean_display_icon` do TaylorHub (v0.21.1), portada pra cá.
+fn clean_display_icon(raw: &str) -> String {
+    let s = raw.trim();
+    match s.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or("").to_string(),
+        None => s.split(',').next().unwrap_or("").trim().to_string(),
+    }
+}
+
 /// Escolhe o exe a partir dos valores CRUS do registro. Pura de propósito: o
 /// caminho difícil (registro sem `InstallLocation`, `DisplayIcon` com `,0`,
 /// caminho entre aspas) é exercitável sem mexer no registro da máquina.
@@ -47,17 +70,15 @@ where
     F: Fn(&Path) -> bool,
 {
     if let Some(loc) = install_location.map(str::trim).filter(|s| !s.is_empty()) {
-        let cand = Path::new(loc.trim_matches('"')).join(exe_name);
+        let cand = Path::new(loc.trim_matches('"').trim()).join(exe_name);
         if exists(&cand) {
             return Some(cand.to_string_lossy().into_owned());
         }
     }
-    // `DisplayIcon` costuma ser `"C:\...\App.exe,0"` — o índice do ícone vem
-    // depois de uma vírgula, e o caminho pode estar entre aspas.
     if let Some(icon) = display_icon.map(str::trim).filter(|s| !s.is_empty()) {
-        let raw = icon.split(',').next().unwrap_or("").trim().trim_matches('"');
+        let raw = clean_display_icon(icon);
         if !raw.is_empty() {
-            let p = Path::new(raw);
+            let p = Path::new(&raw);
             if exists(p) {
                 return Some(p.to_string_lossy().into_owned());
             }
@@ -279,6 +300,35 @@ mod tests {
     #[test]
     fn display_icon_so_com_virgula_nao_vira_caminho_vazio() {
         assert_eq!(exe_from_registry_values(None, Some(",0"), "a.exe", |_| true), None);
+    }
+
+    /// O caso que estava QUEBRADO até a v0.6.2: vírgula DENTRO das aspas.
+    ///
+    /// Pasta com vírgula no nome é legal no Windows, e o NSIS da suíte grava o
+    /// `DisplayIcon` entre aspas. Cortar na vírgula antes de aparar as aspas
+    /// decepava o caminho e a detecção falhava calada — o usuário via só
+    /// "LocalTerminal não encontrado". Quem termina o caminho é o fecha-aspas.
+    #[test]
+    fn virgula_dentro_das_aspas_e_parte_do_caminho() {
+        let real = r"C:\Programas, Meus\LocalTerminal\LocalTerminal.exe";
+        let icon = format!("\"{real}\"");
+        assert_eq!(
+            exe_from_registry_values(None, Some(&icon), "LocalTerminal.exe", only(&[real]))
+                .as_deref(),
+            Some(real),
+            "a vírgula está dentro das aspas: é nome de pasta, não índice de ícone"
+        );
+    }
+
+    /// E o outro formato (electron-builder, sem aspas) segue cortando no `,0`.
+    #[test]
+    fn sem_aspas_o_corte_na_virgula_continua_valendo() {
+        let real = r"C:\Users\X\LocalMind\LocalMind.exe";
+        let icon = format!("{real},0");
+        assert_eq!(
+            exe_from_registry_values(None, Some(&icon), "LocalMind.exe", only(&[real])).as_deref(),
+            Some(real)
+        );
     }
 
     // Só no Windows: aqui os literais COM barra invertida são o próprio objeto
