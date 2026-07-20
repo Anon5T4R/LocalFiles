@@ -176,6 +176,7 @@ const pt = {
   "preview.truncated": "— mostrando só o começo —",
   "preview.unavailable": "Sem visualização pra este tipo de arquivo.",
   "preview.select": "Selecione um arquivo pra visualizar.",
+  "preview.inArchive": "Sem prévia aqui dentro — copie o item pra uma pasta primeiro.",
 
   // Renomear em lote (v0.2)
   "batch.title": "Renomear em lote",
@@ -409,6 +410,7 @@ const en: Record<MessageKey, string> = {
   "preview.truncated": "— showing the beginning only —",
   "preview.unavailable": "No preview for this file type.",
   "preview.select": "Select a file to preview.",
+  "preview.inArchive": "No preview in here — copy the item to a folder first.",
 
   "batch.title": "Batch rename",
   "batch.modeReplace": "Find and replace",
@@ -634,6 +636,7 @@ const es: Record<MessageKey, string> = {
   "preview.truncated": "— mostrando solo el comienzo —",
   "preview.unavailable": "Sin vista previa para este tipo de archivo.",
   "preview.select": "Selecciona un archivo para previsualizar.",
+  "preview.inArchive": "Sin vista previa aquí dentro — copia primero el elemento a una carpeta.",
 
   "batch.title": "Renombrar en lote",
   "batch.modeReplace": "Buscar y reemplazar",

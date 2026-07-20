@@ -224,6 +224,32 @@ fn copy_file_chunked(
     Ok(())
 }
 
+/// Todo arquivo planejado chegou ao destino com o tamanho certo?
+///
+/// É o último portão antes de apagar a origem num "mover" entre volumes. Um
+/// `write_all` pode devolver `Ok` e mesmo assim o arquivo sair curto (disco que
+/// encheu, destino removido no meio do caminho) — sem esta conferência isso
+/// vira "o arquivo sumiu", que é o único estrago irreversível do app.
+///
+/// Tem função própria pra poder ser testada com um destino errado montado à
+/// mão: forçar o caso de verdade exigiria encher um disco no meio do teste.
+fn conferir_copia(files: &[PlannedFile]) -> Result<(), String> {
+    for file in files {
+        let meta = fs::metadata(long_path(&file.dest)).map_err(|e| {
+            format!("conferência falhou, origem preservada — {}", err_at(&file.dest, e))
+        })?;
+        if meta.len() != file.bytes {
+            return Err(format!(
+                "conferência falhou, origem preservada — {}: esperava {} bytes, achei {}",
+                file.dest.display(),
+                file.bytes,
+                meta.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Guarda contra copiar/mover uma pasta pra dentro dela mesma.
 fn dest_inside_source(sources: &[PathBuf], dest_dir: &Path) -> bool {
     sources.iter().any(|s| dest_dir.starts_with(s))
@@ -243,7 +269,7 @@ pub fn run_transfer(
     dest_dir: PathBuf,
     mode: Mode,
 ) {
-    let result = transfer_inner(app, op_id, &cancel, sources, dest_dir, &mode);
+    let result = transfer_inner(Some(app), op_id, &cancel, sources, dest_dir, &mode);
     let canceled = cancel.load(Ordering::Relaxed);
     let (ok, error, created, skipped_symlinks) = match result {
         Ok((created, skipped)) => (true, None, created, skipped),
@@ -264,7 +290,7 @@ pub fn run_transfer(
 }
 
 fn transfer_inner(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     op_id: u64,
     cancel: &AtomicBool,
     sources: Vec<PathBuf>,
@@ -315,6 +341,30 @@ fn transfer_inner(
         return Ok((created, 0));
     }
 
+    let (mais, pulados) = copiar_e_finalizar(app, op_id, cancel, &pending_walk, mode)?;
+    created.extend(mais);
+    Ok((created, pulados))
+}
+
+/// Copia de verdade (e, no "mover", confere e apaga a origem).
+///
+/// Está separado do [`transfer_inner`] por um motivo de TESTE, não de estilo:
+/// o caminho perigoso — copiar+conferir+apagar — só acontece quando o `rename`
+/// falha, e forçar um `rename` a falhar exigiria dois volumes de verdade na
+/// máquina de teste. Com a decisão de rota (`rename` vs cópia) de um lado e a
+/// execução do outro, o teste chama ESTA função com a lista já decidida, que é
+/// exatamente a situação pós-EXDEV — e exercita o código que roda em produção,
+/// em vez de uma cópia da lógica escrita no próprio teste (que passaria verde
+/// mesmo se a produção quebrasse).
+fn copiar_e_finalizar(
+    app: Option<&AppHandle>,
+    op_id: u64,
+    cancel: &AtomicBool,
+    roots: &[(PathBuf, PathBuf)],
+    mode: &Mode,
+) -> Result<(Vec<String>, u64), String> {
+    let mut created: Vec<String> = Vec::new();
+
     // Planeja tudo (total de bytes/arquivos pro progresso ser honesto).
     let mut plan = Plan {
         dirs: vec![],
@@ -322,8 +372,7 @@ fn transfer_inner(
         total_bytes: 0,
         skipped_symlinks: 0,
     };
-    let roots: Vec<(PathBuf, PathBuf)> = pending_walk;
-    for (src, dest) in &roots {
+    for (src, dest) in roots {
         plan_one(src, dest, &mut plan)?;
         created.push(dest.to_string_lossy().into_owned());
     }
@@ -353,7 +402,8 @@ fn transfer_inner(
             done_bytes += n;
             if last_emit.elapsed().as_millis() >= 150 {
                 last_emit = Instant::now();
-                let _ = app.emit(
+                if let Some(app) = app {
+                    let _ = app.emit(
                     "fileop-progress",
                     OpProgress {
                         op_id,
@@ -363,21 +413,24 @@ fn transfer_inner(
                         total_bytes: plan.total_bytes,
                         current: current.clone(),
                     },
-                );
+                    );
+                }
             }
         })?;
         done_files += 1;
-        let _ = app.emit(
-            "fileop-progress",
-            OpProgress {
-                op_id,
-                done_files,
-                total_files,
-                done_bytes,
-                total_bytes: plan.total_bytes,
-                current,
-            },
-        );
+        if let Some(app) = app {
+            let _ = app.emit(
+                "fileop-progress",
+                OpProgress {
+                    op_id,
+                    done_files,
+                    total_files,
+                    done_bytes,
+                    total_bytes: plan.total_bytes,
+                    current,
+                },
+            );
+        }
         let _ = file.bytes; // (usado no plano; progresso vai por bytes reais)
     }
 
@@ -398,20 +451,9 @@ fn transfer_inner(
     //   nenhum: o `remove_dir_all` levaria junto um link que nunca foi copiado.
     //   Vira uma cópia bem-sucedida + aviso, e o usuário decide.
     if matches!(mode, Mode::Move) {
-        for file in &plan.files {
-            let meta = fs::metadata(long_path(&file.dest))
-                .map_err(|e| format!("conferência falhou, origem preservada — {}", err_at(&file.dest, e)))?;
-            if meta.len() != file.bytes {
-                return Err(format!(
-                    "conferência falhou, origem preservada — {}: esperava {} bytes, achei {}",
-                    file.dest.display(),
-                    file.bytes,
-                    meta.len()
-                ));
-            }
-        }
+        conferir_copia(&plan.files)?;
         if plan.skipped_symlinks == 0 {
-            for (src, _dest) in &roots {
+            for (src, _dest) in roots {
                 let meta = fs::symlink_metadata(long_path(src)).map_err(|e| err_at(src, e))?;
                 let r = if meta.is_dir() {
                     fs::remove_dir_all(long_path(src))
@@ -457,83 +499,35 @@ mod tests {
         p
     }
 
-    /// Roda uma transferência SEM AppHandle (o `transfer_inner` só emite
-    /// evento pelo `app`, então os testes exercitam a lógica de verdade
-    /// chamando as peças puras). Aqui a gente replica o miolo do `run_transfer`
-    /// sem o Tauri: planejar, copiar e apagar.
+    /// Copia/move chamando o MOTOR DE PRODUÇÃO, sem AppHandle.
+    ///
+    /// `cross_volume = true` pula a tentativa de `rename` e entra direto no
+    /// [`copiar_e_finalizar`] — que é exatamente o estado em que o app fica
+    /// quando o `rename` devolve EXDEV. É a única forma de exercitar o caminho
+    /// perigoso sem exigir dois volumes de verdade na máquina de teste, e o que
+    /// roda aqui é a função de produção, não uma reescrita dela.
     fn mover_ou_copiar(
         sources: Vec<PathBuf>,
         dest_dir: &Path,
         is_move: bool,
-        forcar_cross_volume: bool,
+        cross_volume: bool,
     ) -> Result<(Vec<String>, u64), String> {
         let cancel = AtomicBool::new(false);
         let mode = if is_move { Mode::Move } else { Mode::Copy };
-        let mut created: Vec<String> = Vec::new();
-        let mut pending: Vec<(PathBuf, PathBuf)> = Vec::new();
-
-        if matches!(mode, Mode::Move) {
-            for src in &sources {
-                let name = src.file_name().ok_or("origem inválida")?;
-                if src.parent() == Some(dest_dir) {
-                    continue;
-                }
-                let dest = unique_target(&dest_dir.join(name));
-                // `forcar_cross_volume` finge que o `rename` falhou (EXDEV) —
-                // é assim que se exercita o caminho copiar+apagar sem precisar
-                // de dois discos de verdade na máquina de teste.
-                let renamed = if forcar_cross_volume {
-                    Err(std::io::Error::other("EXDEV simulado"))
-                } else {
-                    fs::rename(src, &dest)
-                };
-                match renamed {
-                    Ok(()) => created.push(dest.to_string_lossy().into_owned()),
-                    Err(_) => pending.push((src.clone(), dest)),
-                }
-            }
-        } else {
-            for src in &sources {
-                let name = src.file_name().ok_or("origem inválida")?;
-                pending.push((src.clone(), unique_target(&dest_dir.join(name))));
-            }
+        if !cross_volume {
+            return transfer_inner(None, 1, &cancel, sources, dest_dir.to_path_buf(), &mode);
         }
-        if pending.is_empty() {
-            return Ok((created, 0));
-        }
-
-        let mut plan = Plan { dirs: vec![], files: vec![], total_bytes: 0, skipped_symlinks: 0 };
-        for (src, dest) in &pending {
-            plan_one(src, dest, &mut plan)?;
-            created.push(dest.to_string_lossy().into_owned());
-        }
-        for dir in &plan.dirs {
-            fs::create_dir_all(long_path(dir)).map_err(|e| err_at(dir, e))?;
-        }
-        for file in &plan.files {
-            copy_file_chunked(file, &cancel, |_| {})?;
-        }
-        if matches!(mode, Mode::Move) {
-            for file in &plan.files {
-                let meta = fs::metadata(long_path(&file.dest))
-                    .map_err(|e| format!("conferência falhou, origem preservada — {}", err_at(&file.dest, e)))?;
-                if meta.len() != file.bytes {
-                    return Err("conferência falhou, origem preservada".into());
-                }
-            }
-            if plan.skipped_symlinks == 0 {
-                for (src, _) in &pending {
-                    let meta = fs::symlink_metadata(long_path(src)).map_err(|e| err_at(src, e))?;
-                    if meta.is_dir() {
-                        fs::remove_dir_all(long_path(src))
-                    } else {
-                        fs::remove_file(long_path(src))
-                    }
-                    .map_err(|e| err_at(src, e))?;
-                }
-            }
-        }
-        Ok((created, plan.skipped_symlinks))
+        // Rota já decidida como "não deu rename": monta os pares origem→destino
+        // com a mesma regra de colisão do transfer_inner e entrega o resto pro
+        // motor de produção.
+        let roots: Vec<(PathBuf, PathBuf)> = sources
+            .iter()
+            .map(|src| {
+                let nome = src.file_name().expect("origem sem nome");
+                (src.clone(), unique_target(&dest_dir.join(nome)))
+            })
+            .collect();
+        copiar_e_finalizar(None, 1, &cancel, &roots, &mode)
     }
 
     #[test]
@@ -629,6 +623,42 @@ mod tests {
             fs::read_to_string(destino.join("dados (2)/novo.txt")).unwrap(),
             "versao da origem"
         );
+
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn conferencia_pega_destino_curto_ou_faltando() {
+        // O portão que protege o "mover": se ele deixar passar, a origem é
+        // apagada e o arquivo do usuário some. Aqui os três casos são montados
+        // à mão porque encher um disco no meio do teste não é viável.
+        let d = tmp("conferencia");
+        let bom = d.join("bom.bin");
+        fs::write(&bom, vec![7u8; 1000]).unwrap();
+        let curto = d.join("curto.bin");
+        fs::write(&curto, vec![7u8; 999]).unwrap(); // 1 byte a menos
+
+        let planejado = |dest: &Path, bytes: u64| PlannedFile {
+            src: d.join("origem-qualquer"),
+            dest: dest.to_path_buf(),
+            bytes,
+        };
+
+        // Tudo certo: passa.
+        conferir_copia(&[planejado(&bom, 1000)]).expect("destino correto deveria passar");
+
+        // Um byte a menos: recusa, e a mensagem diz que a origem foi preservada
+        // (é o que o usuário precisa ler pra saber que não perdeu nada).
+        let e = conferir_copia(&[planejado(&curto, 1000)]).unwrap_err();
+        assert!(e.contains("origem preservada"), "{e}");
+        assert!(e.contains("esperava 1000"), "{e}");
+
+        // Destino que nem existe: recusa também.
+        let e = conferir_copia(&[planejado(&d.join("nao-existe.bin"), 1)]).unwrap_err();
+        assert!(e.contains("origem preservada"), "{e}");
+
+        // Um bom e um ruim na mesma leva: a leva inteira é recusada.
+        assert!(conferir_copia(&[planejado(&bom, 1000), planejado(&curto, 1000)]).is_err());
 
         let _ = fs::remove_dir_all(&d);
     }

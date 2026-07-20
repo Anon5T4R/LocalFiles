@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isVirtual } from "../lib/apath";
 import { readTextHead } from "../lib/backend";
 import { KIND_ICON, formatBytes, formatDate, kindOf, type FileKind } from "../lib/fsutil";
 import { getThumb } from "../lib/thumbs";
@@ -46,6 +47,11 @@ function PreviewBody({ entry }: { entry: Entry }) {
     setImg(null);
     setText(null);
     setFailed(false);
+    // Item DENTRO de um arquivo compactado não tem caminho de disco: pedir
+    // miniatura ou texto ao back-end só geraria erro. Nem tenta — e a mensagem
+    // diz o motivo CERTO ("está dentro de um arquivo"), não "este tipo não tem
+    // visualização", que era falso e mandava a pessoa procurar no lugar errado.
+    if (isVirtual(entry.path)) return;
     if (kind === "image") {
       void getThumb(entry.path, 512).then((url) => {
         if (!alive) return;
@@ -102,7 +108,11 @@ function PreviewBody({ entry }: { entry: Entry }) {
       ) : (
         <div className="preview-icon-wrap">
           <span className="preview-icon">{KIND_ICON[kind]}</span>
-          {failed && <div className="muted small">{t("preview.unavailable")}</div>}
+          {isVirtual(entry.path) ? (
+            <div className="muted small">{t("preview.inArchive")}</div>
+          ) : (
+            failed && <div className="muted small">{t("preview.unavailable")}</div>
+          )}
         </div>
       )}
       {info}
