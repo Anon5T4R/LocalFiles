@@ -54,6 +54,22 @@ pub(crate) fn entry_from(path: &Path, meta: &fs::Metadata, name: String) -> Entr
     }
 }
 
+/// Contorna a titlebar quebrada do tao <= 0.35 no GNOME/Wayland (CSD propia
+/// com regiao de input morta — causa e fix em tao#1218, so via tauri 2.12):
+/// troca por uma HeaderBar comum com layout forcado min/max/fechar, ANTES do
+/// primeiro map. Sai junto com o upgrade ao tao 0.36 (wry 0.56).
+#[cfg(target_os = "linux")]
+fn instalar_csd_limpa(w: &tauri::WebviewWindow) {
+    use gtk::prelude::*;
+    let Ok(gw) = w.gtk_window() else { return };
+    let header = gtk::HeaderBar::new();
+    header.set_show_close_button(true);
+    header.set_decoration_layout(Some("menu:minimize,maximize,close"));
+    header.set_title(Some("LocalFiles"));
+    header.show();
+    gw.set_titlebar(Some(&header));
+}
+
 fn modified_ms(meta: &fs::Metadata) -> i64 {
     meta.modified()
         .ok()
@@ -507,20 +523,13 @@ pub fn run() {
     // que sobrou lib de host em algum AppDir, que é onde se deve olhar.
 
     let mut builder = tauri::Builder::default()
-        .on_window_event(|window, event| {
-            // Bug do tao <= 0.35 no GNOME/Wayland: botões da titlebar (min/
-            // max/fechar) mortos até um resize (tauri#13440, tauri#11856). O
-            // toggle de `resizable` em cada foco força o GTK a revalidar as
-            // decorações, restaurando o estado original em seguida. Remover
-            // quando o tauri puxar o tao 0.36 (via wry 0.56).
+        .setup(|app| {
+            // Titlebar limpa no GNOME/Wayland (tao <= 0.35) — ver lib.rs do LocalImage.
             #[cfg(target_os = "linux")]
-            if let tauri::WindowEvent::Focused(true) = event {
-                let r = window.is_resizable().unwrap_or(true);
-                let _ = window.set_resizable(!r);
-                let _ = window.set_resizable(r);
+            if let Some(w) = app.get_webview_window("main") {
+                instalar_csd_limpa(&w);
             }
-            #[cfg(not(target_os = "linux"))]
-            let _ = (window, event);
+            Ok(())
         });
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -54,3 +54,8 @@ tauri-plugin-single-instance = "2"
 # mesma fonte que o TaylorHub usa. O NSIS do Tauri não põe o app no PATH, então
 # procurar por nome só funcionaria na máquina do desenvolvedor.
 winreg = "0.55"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# CSD limpa: contorna a titlebar quebrada do tao <= 0.35 no GNOME/Wayland
+# (ver lib.rs). Mesma versao que o tauri ja puxa. Sai junto com o upgrade ao tao 0.36.
+gtk = "0.18"
